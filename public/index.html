@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>共享文档</title>
+    <link rel="stylesheet" href="/assets/site.css" />
+    <script src="/assets/theme.js"></script>
+    <script src="/assets/import-mine.js"></script>
+</head>
+
+<body class="glow">
+    <header class="topbar">
+        <a class="logo" href="/">
+            <span class="logo-mark"><i class="icon i-file"></i></span>
+            <span class="logo-text">共享文档</span>
+        </a>
+        <span class="spacer"></span>
+        <a class="btn" href="https://suolk.cc.cd/"><i class="icon i-arrow-left"></i><span>返回主页</span></a>
+        <button class="btn btn-icon" onclick="toggleTheme()" title="切换夜间模式"><i class="icon i-theme"></i></button>
+    </header>
+
+    <main class="landing">
+        <span class="eyebrow">Markdown · 无需登录</span>
+        <h1>写一篇文档，<br /><span class="gradient-text">分享一个链接。</span></h1>
+        <p class="lead">
+            新建后会得到两个链接：<b>编辑链接</b>自己留着或发给协作者，<b>只读链接</b>可以随便分享。谁拿到编辑链接谁就能改。
+        </p>
+
+        <button class="btn btn-primary btn-lg" id="createBtn"><i class="icon i-plus"></i><span>新建文档</span></button>
+        <p class="form-error" id="error" hidden></p>
+
+        <div class="features">
+            <div class="feature">
+                <span class="icon-tile"><i class="icon i-columns"></i></span>
+                <h3>像 Word 一样编辑</h3>
+                <p>所见即所得，不会 Markdown 也能用；会写的可以切换到分屏模式，也能直接导入 .md 文件。</p>
+            </div>
+            <div class="feature">
+                <span class="icon-tile"><i class="icon i-history"></i></span>
+                <h3>自动保存 + 历史版本</h3>
+                <p>停止输入就自动保存，改错了可以在历史里一键恢复。</p>
+            </div>
+            <div class="feature">
+                <span class="icon-tile"><i class="icon i-users"></i></span>
+                <h3>多人共享</h3>
+                <p>右上角显示有几个人正在看，别人保存的内容会自动同步过来。</p>
+            </div>
+        </div>
+
+        <section id="mine" hidden>
+            <h2 class="section-title">我在这台设备上创建的文档</h2>
+            <ul class="doc-list" id="docList"></ul>
+            <p class="hint">这份列表只存在当前浏览器里。编辑链接丢了就没法再编辑，建议自己另存一份。</p>
+        </section>
+    </main>
+
+    <script>
+        const MY_DOCS_KEY = 'shareddoc:mine';
+
+        const loadMine = () => JSON.parse(localStorage.getItem(MY_DOCS_KEY) || '[]');
+        const saveMine = (docs) => localStorage.setItem(MY_DOCS_KEY, JSON.stringify(docs));
+
+        function button(tag, className, icon, label, title) {
+            const el = document.createElement(tag);
+            el.className = `btn ${className}`;
+            el.innerHTML = `<i class="icon ${icon}"></i><span>${label}</span>`;
+            if (title) el.title = title;
+            return el;
+        }
+
+        function renderMine() {
+            const docs = loadMine();
+            document.getElementById('mine').hidden = docs.length === 0;
+            document.getElementById('docList').replaceChildren(...docs.map((d) => {
+                const title = document.createElement('span');
+                title.className = 'title';
+                title.textContent = d.title || d.docId;
+
+                const time = document.createElement('small');
+                time.textContent = new Date(d.createdAt).toLocaleDateString();
+
+                const edit = button('a', 'btn-outline', 'i-pencil', '编辑');
+                edit.href = `/doc/${d.docId}?key=${encodeURIComponent(d.editKey)}`;
+
+                const view = button('a', '', 'i-eye', '只读');
+                view.href = `/doc/${d.docId}`;
+
+                const remove = button('button', 'btn-icon btn-danger', 'i-trash', '', '从列表移除（文档本身不会被删除）');
+                remove.onclick = () => {
+                    if (!confirm('从列表中移除？文档本身不会被删除，但如果你没有另存编辑链接，就再也无法编辑它了。')) return;
+                    saveMine(loadMine().filter((x) => x.docId !== d.docId));
+                    renderMine();
+                };
+
+                const li = document.createElement('li');
+                li.append(title, time, edit, view, remove);
+                return li;
+            }));
+        }
+
+        document.getElementById('createBtn').onclick = async (e) => {
+            const btn = e.currentTarget;
+            const errEl = document.getElementById('error');
+            btn.disabled = true;
+            errEl.hidden = true;
+            try {
+                const res = await fetch('/api/doc', { method: 'POST', signal: AbortSignal.timeout(20000) });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `服务器返回 ${res.status}`);
+
+                saveMine([{ docId: data.docId, editKey: data.editKey, createdAt: Date.now() }, ...loadMine()]);
+                location.href = `/doc/${data.docId}?key=${encodeURIComponent(data.editKey)}&new=1`;
+            } catch (err) {
+                errEl.textContent = '创建失败：' + (err.name === 'TimeoutError' ? '请求超时，请重试' : err.message);
+                errEl.hidden = false;
+                btn.disabled = false;
+            }
+        };
+
+        renderMine();
+    </script>
+</body>
+
+</html>

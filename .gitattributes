@@ -1,0 +1,8 @@
+# 强制 LF 行尾。
+# core.autocrlf=true 会把签出的文件转成 CRLF，而 Cloudflare Pages 的
+# _redirects / _headers 是按行解析的纯文本，行尾残留 \r 可能让状态码
+# 被读成 "301\r" 而导致规则失效。这里统一锁成 LF。
+* text=auto eol=lf
+
+# 例外：.bat 必须是 CRLF，cmd.exe 解析 LF 行尾的批处理时 goto/标签等会出错。
+*.bat text eol=crlf

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>共享文档</title>
+    <!-- Vditor 自托管在 /vendor/（scripts/vendor.mjs 复制），升级版本时这里的路径要一起改 -->
+    <link rel="stylesheet" href="/vendor/vditor-4.0.0/dist/index.css" />
+    <link rel="stylesheet" href="/assets/site.css" />
+    <script src="/assets/theme.js"></script>
+    <script src="/assets/import-mine.js"></script>
+    <script src="/vendor/vditor-4.0.0/dist/index.min.js"></script>
+</head>
+
+<body>
+    <div id="chrome">
+        <header class="topbar">
+            <a class="logo" href="/">
+                <span class="logo-mark"><i class="icon i-file"></i></span>
+                <span class="logo-text">共享文档</span>
+            </a>
+            <span class="pill" id="modeBadge"><i class="icon i-eye" id="modeIcon"></i><span class="pill-label" id="modeLabel">只读</span></span>
+
+            <span class="spacer"></span>
+
+            <span class="status" id="status"></span>
+
+            <span class="tool-group" id="editTools" hidden>
+                <button class="btn" id="importBtn" title="导入 .md 文件（也可以直接粘贴或拖进编辑区）">
+                    <i class="icon i-upload"></i><span>导入</span>
+                </button>
+                <button class="btn" id="linksBtn" title="显示 / 收起链接栏">
+                    <i class="icon i-link"></i><span>链接</span>
+                </button>
+            </span>
+            <button class="btn" id="downloadBtn" title="下载 .md">
+                <i class="icon i-download"></i><span>下载</span>
+            </button>
+            <button class="btn" id="historyBtn" title="历史版本">
+                <i class="icon i-history"></i><span>历史</span>
+            </button>
+            <button class="btn btn-primary" id="saveBtn" title="保存（Ctrl+S）" hidden>
+                <i class="icon i-save"></i><span>保存</span>
+            </button>
+            <button class="btn btn-icon" onclick="toggleTheme()" title="切换夜间模式"><i class="icon i-theme"></i></button>
+
+            <span class="online"><span class="dot"></span><span><b id="onlineCount">–</b> 人<span class="online-long">正在编辑</span></span></span>
+        </header>
+
+        <div class="banner" id="linkBar" hidden>
+            <p class="banner-text" id="linkHint" hidden>
+                <b>文档已创建。</b><b>只读链接</b>可以随便分享；<b>编辑链接</b>请自己收好，丢了就不能再编辑。
+            </p>
+            <div class="copy-field">
+                <span class="copy-label"><i class="icon i-eye"></i>只读链接</span>
+                <input id="viewLinkInput" readonly />
+                <button class="btn btn-outline" id="copyViewLink" title="复制只读链接"><i class="icon i-copy"></i><span>复制</span></button>
+            </div>
+            <div class="copy-field">
+                <span class="copy-label edit"><i class="icon i-pencil"></i>编辑链接</span>
+                <input id="editLinkInput" readonly />
+                <button class="btn btn-outline" id="copyEditLink" title="复制编辑链接"><i class="icon i-copy"></i><span>复制</span></button>
+            </div>
+            <button class="btn btn-icon banner-close" id="linkBarClose" title="收起（点顶栏的「链接」可以再打开）"><i class="icon i-x"></i></button>
+        </div>
+
+        <div class="banner error" id="errorNotice" hidden></div>
+    </div>
+
+    <main class="workspace reading" id="workspace">
+        <!-- 编辑模式：Vditor 编辑器（所见即所得 / 即时渲染 / 分屏，工具栏里切换） -->
+        <section class="pane" id="editorPane" hidden>
+            <div id="vditor"></div>
+        </section>
+        <!-- 只读模式 -->
+        <section class="pane reader" id="readerPane">
+            <div class="pane-head"><b>文档</b><span id="updatedLabel"></span></div>
+            <div class="pane-body">
+                <article class="doc-body" id="preview"><p class="empty">加载中…</p></article>
+            </div>
+        </section>
+    </main>
+
+    <!-- 只在打印（Ctrl+P / 另存为 PDF）时显示：打印前填入当前文档，界面其余部分全部隐藏 -->
+    <article class="vditor-reset print-only" id="printArea"></article>
+
+    <dialog class="drawer" id="historyDialog">
+        <header class="drawer-head">
+            <h2>历史版本</h2>
+            <button class="btn btn-primary" id="restoreBtn" disabled><i class="icon i-restore"></i><span>恢复此版本</span></button>
+            <button class="btn btn-icon" id="historyClose" title="关闭"><i class="icon i-x"></i></button>
+        </header>
+        <div class="drawer-body">
+            <ul class="version-list" id="versionList"></ul>
+            <div class="version-preview">
+                <article class="doc-body" id="versionPreview"></article>
+            </div>
+        </div>
+    </dialog>
+
+    <input type="file" id="fileInput" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden />
+
+    <script src="/assets/editor.js"></script>
+</body>
+
+</html>

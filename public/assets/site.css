@@ -1,0 +1,840 @@
+/* 共享文档样式：文档首页、文档页（主页 self-page 有自己的一份，配色保持一致） */
+
+/* 配色由 <html data-theme="light|dark"> 决定，见 theme.js。
+   两套主题只换下面这组基础色，其余颜色都用 color-mix 从它们推出来 */
+:root {
+  color-scheme: light;
+  --coral: #ff7f50;
+  --coral-hover: #f5693a;
+  --coral-ink: #c4481f;   /* 背景上的珊瑚色文字，保证对比度 */
+  --bg: #f6f0ec;
+  --surface: #fffcfa;
+  --line: #ebe1da;
+  --ink: #2b211c;
+  --muted: #7d6d64;
+  --ok: #2f9e6b;
+  --danger: #d23f3f;
+  --shadow: 0 1px 2px rgb(43 33 28 / 4%), 0 8px 24px rgb(43 33 28 / 6%);
+
+  --coral-soft: color-mix(in srgb, var(--coral) 10%, var(--surface));
+  --coral-line: color-mix(in srgb, var(--coral) 32%, var(--surface));
+  --chip: color-mix(in srgb, var(--ink) 6%, var(--surface));
+  --code-bg: color-mix(in srgb, var(--ink) 4%, var(--surface));
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  --danger-line: color-mix(in srgb, var(--danger) 30%, var(--surface));
+  --glow: 16%; /* 主页、文档首页背景上珊瑚色光晕的浓度 */
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+}
+
+/* 深色参考 VS Code Dark Modern：中性灰，不带色偏 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --coral-hover: #ff9368;
+  --coral-ink: #ff9c78;
+  --bg: #181818;
+  --surface: #1f1f1f;
+  --line: #2e2e2e;
+  --ink: #e4e4e4;
+  --muted: #9d9d9d;
+  --ok: #43b883;
+  --danger: #f07070;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px rgb(0 0 0 / 35%);
+  --glow: 5%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+body.glow {
+  min-height: 100vh;
+  background:
+    radial-gradient(60rem 32rem at -10% -10%, rgb(255 127 80 / var(--glow)), transparent 60%),
+    radial-gradient(50rem 30rem at 110% 110%, rgb(255 170 120 / var(--glow)), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+::selection {
+  background: var(--coral-line);
+}
+
+.gradient-text {
+  background: linear-gradient(120deg, #ff9a6b, var(--coral) 45%, #ff5f45);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------- 图标：Lucide 的 SVG 做遮罩，颜色跟随文字 ---------- */
+
+.icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask: var(--i) center / contain no-repeat;
+  mask: var(--i) center / contain no-repeat;
+}
+
+.i-arrow-left { --i: url("/vendor/lucide/arrow-left.svg"); }
+.i-columns { --i: url("/vendor/lucide/columns-2.svg"); }
+.i-copy { --i: url("/vendor/lucide/copy.svg"); }
+.i-download { --i: url("/vendor/lucide/download.svg"); }
+.i-eye { --i: url("/vendor/lucide/eye.svg"); }
+.i-file { --i: url("/vendor/lucide/file-text.svg"); }
+.i-history { --i: url("/vendor/lucide/history.svg"); }
+.i-link { --i: url("/vendor/lucide/link.svg"); }
+.i-pencil { --i: url("/vendor/lucide/pencil.svg"); }
+.i-plus { --i: url("/vendor/lucide/plus.svg"); }
+.i-restore { --i: url("/vendor/lucide/rotate-ccw.svg"); }
+.i-save { --i: url("/vendor/lucide/save.svg"); }
+.i-trash { --i: url("/vendor/lucide/trash-2.svg"); }
+.i-upload { --i: url("/vendor/lucide/upload.svg"); }
+.i-users { --i: url("/vendor/lucide/users.svg"); }
+.i-x { --i: url("/vendor/lucide/x.svg"); }
+/* 主题切换按钮：浅色时显示月亮，深色时显示太阳 */
+.i-theme { --i: url("/vendor/lucide/moon.svg"); }
+[data-theme="dark"] .i-theme { --i: url("/vendor/lucide/sun.svg"); }
+
+.icon-tile {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--coral-soft);
+  color: var(--coral);
+}
+
+.icon-tile .icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* ---------- 按钮 ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: 500 13px/1 var(--font);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.btn:hover,
+.btn.active {
+  background: var(--coral-soft);
+  color: var(--coral-ink);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--coral);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.btn-outline {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.btn-outline:hover {
+  border-color: var(--coral-line);
+}
+
+.btn-primary {
+  background: var(--coral);
+  color: #fff;
+  box-shadow: 0 2px 10px rgb(255 127 80 / 35%);
+}
+
+.btn-primary:hover {
+  background: var(--coral-hover);
+  color: #fff;
+}
+
+.btn-danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.btn-lg {
+  height: 46px;
+  padding: 0 22px;
+  border-radius: 12px;
+  font-size: 15px;
+}
+
+.btn-lg .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.btn-icon {
+  width: 34px;
+  padding: 0;
+}
+
+/* ---------- 顶栏 ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 56px;
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 8px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.logo-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #ff9a6b, var(--coral) 60%, #ff6a4d);
+  color: #fff;
+  box-shadow: 0 2px 8px rgb(255 127 80 / 35%);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* 一组按钮：本身不占位，里面的按钮直接参与顶栏排版 */
+.tool-group {
+  display: contents;
+}
+
+.pill .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.pill.editing {
+  background: var(--coral-soft);
+  color: var(--coral-ink);
+}
+
+.status {
+  margin-right: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.online {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.online b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.online .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgb(47 158 107 / 45%); }
+  70%, 100% { box-shadow: 0 0 0 6px rgb(47 158 107 / 0%); }
+}
+
+/* ---------- 提示条 / 链接栏 ---------- */
+
+.banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 12px 16px 0;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.banner.new {
+  border-color: var(--coral-line);
+  background: var(--coral-soft);
+}
+
+.banner.error {
+  padding-left: 16px;
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.banner-text {
+  flex-basis: 100%;
+  padding-left: 4px;
+}
+
+.copy-field {
+  display: flex;
+  flex: 1 1 360px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.copy-field input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 12px var(--mono);
+}
+
+.copy-field input:focus {
+  outline: none;
+  border-color: var(--coral);
+}
+
+.copy-label {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  min-width: 64px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.copy-label .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.copy-label.edit {
+  color: var(--coral-ink);
+}
+
+/* ---------- 文档页 ---------- */
+
+.workspace {
+  display: flex;
+  gap: 12px;
+  height: calc(100dvh - var(--chrome-height, 56px));
+  padding: 12px 16px 16px;
+}
+
+.pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.pane.dragover {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 4px rgb(255 127 80 / 15%);
+}
+
+.pane-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pane-head b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 只读模式：正文居中，限制宽度 */
+.reader {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.doc-body {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 36px 80px;
+}
+
+/* Vditor 编辑器铺满卡片，界面颜色换成站点配色（浅色 / 深色都走这组变量） */
+#editorPane .vditor {
+  border: none;
+  border-radius: 0;
+}
+
+/* 字数的提示气泡：Vditor 默认显示统计类型名（“text”），而且每次更新都会重写，所以直接用 CSS 指定 */
+#editorPane .vditor-counter::after {
+  content: "字数";
+}
+
+.vditor {
+  --border-color: var(--line);
+  --second-color: color-mix(in srgb, var(--muted) 45%, transparent);
+  --panel-background-color: var(--surface);
+  --panel-shadow: var(--shadow);
+  --toolbar-background-color: var(--surface);
+  --toolbar-icon-color: var(--muted);
+  --toolbar-icon-hover-color: var(--coral);
+  --textarea-background-color: var(--surface);
+  --textarea-text-color: var(--ink);
+  --count-background-color: var(--chip);
+  --heading-border-color: var(--line);
+  --blockquote-color: var(--muted);
+  --resize-hover-background-color: var(--coral);
+}
+
+/* 正文排版（编辑区和只读页共用 .vditor-reset）。
+   Vditor 的正文主题是运行时动态插入的样式表，排在本文件之后，所以这里加 html 前缀提高优先级 */
+html .vditor-reset {
+  color: var(--ink);
+  font-family: var(--font);
+}
+
+html .vditor-reset a {
+  color: var(--coral-ink);
+}
+
+html .vditor-reset blockquote {
+  color: var(--muted);
+  border-left-color: var(--coral-line);
+}
+
+html .vditor-reset h1,
+html .vditor-reset h2 {
+  border-bottom-color: var(--line);
+}
+
+html .vditor-reset hr {
+  background-color: var(--line);
+}
+
+html .vditor-reset table tr,
+html .vditor-reset table td,
+html .vditor-reset table th {
+  border-color: var(--line);
+  background-color: transparent;
+}
+
+html .vditor-reset table tbody tr:nth-child(2n),
+html .vditor-reset pre > code,
+html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
+  background-color: var(--code-bg);
+}
+
+.empty {
+  padding: 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---------- 历史版本抽屉（<dialog>） ---------- */
+
+.drawer {
+  width: min(840px, 100vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0 0 0 auto;
+  border: none;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: -12px 0 40px rgb(43 33 28 / 12%);
+}
+
+.drawer[open] {
+  display: flex;
+  flex-direction: column;
+  animation: drawer-in 0.22s ease-out;
+}
+
+.drawer::backdrop {
+  background: rgb(43 33 28 / 28%);
+  backdrop-filter: blur(2px);
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+.drawer-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  height: 56px;
+  padding: 0 12px 0 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.drawer-head h2 {
+  flex: 1;
+  font-size: 15px;
+}
+
+.drawer-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.version-list {
+  flex-shrink: 0;
+  width: 240px;
+  padding: 8px;
+  overflow: auto;
+  list-style: none;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.version-list li {
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.version-list li small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.version-list li:hover,
+.version-list li.active {
+  background: var(--surface);
+}
+
+.version-list li.active {
+  box-shadow: inset 3px 0 0 var(--coral), var(--shadow);
+}
+
+.version-list li.empty {
+  cursor: default;
+  background: none;
+}
+
+.version-preview {
+  flex: 1;
+  overflow: auto;
+}
+
+.version-preview .doc-body {
+  padding: 24px 32px;
+}
+
+/* ---------- 共享文档首页 ---------- */
+
+.landing {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 72px 24px 96px;
+}
+
+.eyebrow {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--coral-soft);
+  color: var(--coral-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.landing h1 {
+  margin: 18px 0 16px;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.lead {
+  max-width: 580px;
+  margin-bottom: 28px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.form-error {
+  margin-top: 12px;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 56px;
+}
+
+.feature {
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+.feature h3 {
+  margin: 12px 0 4px;
+  font-size: 14px;
+}
+
+.feature p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.section-title {
+  margin: 56px 0 14px;
+  font-size: 16px;
+}
+
+.doc-list {
+  overflow: hidden;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+.doc-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 10px 10px 16px;
+}
+
+.doc-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.doc-list .title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-list small {
+  margin-right: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hint {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---------- 窄屏 ---------- */
+
+@media (max-width: 900px) {
+  .topbar .btn span {
+    display: none;
+  }
+
+  .topbar .btn {
+    width: 34px;
+    padding: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .logo-text,
+  .topbar .status,
+  .pill-label,
+  .online-long,
+  .banner-close {
+    display: none; /* 链接栏在窄屏下用顶栏的「链接」按钮收起，省得关闭按钮单独占一行 */
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+
+  .topbar .btn {
+    width: 32px;
+  }
+
+  .workspace {
+    padding: 8px;
+  }
+
+  /* 只读页在手机上跟着页面整体滚动 */
+  .workspace.reading {
+    height: auto;
+  }
+
+  .doc-body {
+    padding: 20px;
+  }
+
+  .drawer-body {
+    flex-direction: column;
+  }
+
+  .version-list {
+    width: auto;
+    max-height: 34vh;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+/* ---------- 打印 / 另存为 PDF：只打印文档正文，强制浅色 ---------- */
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  :root,
+  :root[data-theme="dark"] {
+    color-scheme: light;
+    --bg: #fff;
+    --surface: #fff;
+    --line: #ddd;
+    --ink: #1f1f1f;
+    --muted: #555;
+    --coral-ink: #c4481f;
+  }
+
+  body > :not(#printArea) {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  #printArea {
+    display: block;
+  }
+
+  #printArea pre,
+  #printArea table,
+  #printArea img {
+    break-inside: avoid;
+  }
+}
