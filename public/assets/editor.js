@@ -23,6 +23,32 @@
   const VDITOR_CDN = document.querySelector('script[src*="/vendor/vditor-"]').src.replace(/\/dist\/.*$/, '');
   const CONTENT_THEME_PATH = `${VDITOR_CDN}/dist/css/content-theme`;
 
+  // 「流程图」按钮插入的 Mermaid 模板，不会写语法的人改改方括号、花括号里的文字就能用。
+  // 前后各有一个换行：分屏模式下是在光标处插入文字，这样代码块总是从新的一行开始
+  const FLOWCHART_TEMPLATE = `
+\`\`\`mermaid
+flowchart TD
+    A[开始] --> B{条件判断}
+    B -->|是| C[步骤一]
+    B -->|否| D[步骤二]
+    C --> E[结束]
+    D --> E
+\`\`\`
+`;
+  const FLOWCHART_BUTTON = {
+    name: 'flowchart',
+    tip: '流程图',
+    tipPosition: 's',
+    icon: '<i class="icon i-workflow"></i>',
+    click: () => {
+      vditor.insertMD(FLOWCHART_TEMPLATE);
+      // insertMD 插入后不会马上把图画出来（要等下次输入），手动画一下（:not(code) 排除源码，已经画好的有 data-processed）
+      for (const el of els.editorPane.querySelectorAll('.language-mermaid:not(code):not([data-processed])')) {
+        Vditor.mermaidRender(el.parentElement, VDITOR_CDN);
+      }
+    },
+  };
+
   // 工具栏：常用格式 + 模式切换；上传、导出、emoji 等用不上的没放。手机屏幕窄，只留最常用的。
   // 提示气泡默认往上弹，会被编辑区卡片的上沿裁掉，所以改成往下（tipPosition: 's'）
   const TOOLBAR = (matchMedia('(max-width: 720px)').matches
@@ -30,10 +56,10 @@
     : [
       'headings', 'bold', 'italic', 'strike', '|',
       'list', 'ordered-list', 'check', 'quote', 'line', '|',
-      'link', 'table', 'code', 'inline-code', '|',
+      'link', 'table', FLOWCHART_BUTTON, 'code', 'inline-code', '|',
       'undo', 'redo', '|',
       'edit-mode', 'outline', 'fullscreen',
-    ]).map((name) => (name === '|' ? name : { name, tipPosition: 's' }));
+    ]).map((item) => (typeof item === 'string' && item !== '|' ? { name: item, tipPosition: 's' } : item));
 
   // 页面上所有带 id 的元素，按 id 取用
   const els = Object.fromEntries([...document.querySelectorAll('[id]')].map((el) => [el.id, el]));
@@ -366,9 +392,23 @@
     URL.revokeObjectURL(a.href);
   };
 
-  // Ctrl+P / 另存为 PDF 时只打印文档正文（打印样式见 site.css 的 @media print）
+  // Ctrl+P / 另存为 PDF 时只打印文档正文（打印样式见 site.css 的 @media print）。
+  // 公式、流程图要异步渲染，beforeprint 里来不及重新渲染，所以复制页面上已经渲染好的
   addEventListener('beforeprint', () => {
-    els.printArea.innerHTML = state.canEdit ? vditor.getHTML() : els.preview.innerHTML;
+    if (state.canEdit) {
+      // 编辑器导出的 HTML 里公式、流程图还是源码，按出现顺序换成编辑区里渲染好的（:not(code) 排除编辑区里的源码）
+      els.printArea.innerHTML = vditor.getHTML();
+      const RENDERED = ':is(.language-math, .language-mermaid):not(code)';
+      const rendered = els.editorPane.querySelectorAll(RENDERED);
+      const sources = els.printArea.querySelectorAll(RENDERED);
+      if (rendered.length === sources.length) sources.forEach((el, i) => (el.innerHTML = rendered[i].innerHTML));
+    } else {
+      els.printArea.innerHTML = els.preview.innerHTML;
+    }
+    // 复制出来的图和原图 id 相同，箭头等引用会找到原图里的定义，而原图打印时被隐藏，箭头就画不出来了
+    for (const svg of els.printArea.querySelectorAll('.language-mermaid > svg[id]')) {
+      svg.outerHTML = svg.outerHTML.replaceAll(svg.id, `print-${svg.id}`);
+    }
   });
 
   // ---------- 链接栏：编辑模式下列出只读链接和编辑链接，收起状态会记住 ----------

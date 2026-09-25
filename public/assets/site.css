@@ -110,6 +110,7 @@ body.glow {
 .i-trash { --i: url("/vendor/lucide/trash-2.svg"); }
 .i-upload { --i: url("/vendor/lucide/upload.svg"); }
 .i-users { --i: url("/vendor/lucide/users.svg"); }
+.i-workflow { --i: url("/vendor/lucide/workflow.svg"); }
 .i-x { --i: url("/vendor/lucide/x.svg"); }
 /* 主题切换按钮：浅色时显示月亮，深色时显示太阳 */
 .i-theme { --i: url("/vendor/lucide/moon.svg"); }
@@ -471,6 +472,12 @@ body.glow {
   content: "字数";
 }
 
+/* 自己加的工具栏按钮（流程图）用站点的图标，大小和 Vditor 自带的一致 */
+.vditor-toolbar .icon {
+  width: 15px;
+  height: 15px;
+}
+
 .vditor {
   --border-color: var(--line);
   --second-color: color-mix(in srgb, var(--muted) 45%, transparent);
@@ -523,6 +530,13 @@ html .vditor-reset table tbody tr:nth-child(2n),
 html .vditor-reset pre > code,
 html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
   background-color: var(--code-bg);
+}
+
+/* Mermaid 图始终按浅色渲染（见 scripts/vendor.mjs），深色模式下反色显示，切换明暗不用重画；打印时不反色 */
+@media screen {
+  [data-theme="dark"] .language-mermaid > svg {
+    filter: invert(1) hue-rotate(180deg);
+  }
 }
 
 .empty {
