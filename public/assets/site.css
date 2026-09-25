@@ -1,4 +1,4 @@
-/* 共享文档样式：文档首页、文档页（主页 self-page 有自己的一份，配色保持一致） */
+/* 共享文档样式：文档首页、文档页 */
 
 /* 配色由 <html data-theme="light|dark"> 决定，见 theme.js。
    两套主题只换下面这组基础色，其余颜色都用 color-mix 从它们推出来 */
@@ -22,7 +22,7 @@
   --code-bg: color-mix(in srgb, var(--ink) 4%, var(--surface));
   --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--surface));
   --danger-line: color-mix(in srgb, var(--danger) 30%, var(--surface));
-  --glow: 16%; /* 主页、文档首页背景上珊瑚色光晕的浓度 */
+  --glow: 16%; /* 文档首页背景上珊瑚色光晕的浓度 */
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;

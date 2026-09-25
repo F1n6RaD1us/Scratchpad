@@ -1,7 +1,7 @@
 {
   "name": "shared-docs",
   "private": true,
-  "description": "docs.suolk.cc.cd 多人共享 Markdown 文档（Cloudflare Pages + D1）",
+  "description": "多人共享 Markdown 文档（Cloudflare Pages + D1）",
   "devDependencies": {
     "lucide-static": "1.48.0",
     "vditor": "4.0.0"

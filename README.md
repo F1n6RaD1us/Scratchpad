@@ -1,33 +1,31 @@
 # shared-docs
 
-多人共享的 Markdown 文档，部署在 Cloudflare Pages：**https://docs.suolk.cc.cd**
+多人共享的 Markdown 文档，跑在 Cloudflare Pages + D1 上，免费额度内就够用。不需要登录：新建后得到一个只读链接和一个编辑链接，拿到编辑链接的人就能改。
 
-| 路径 | 内容 |
-|---|---|
-| `/` | 文档首页（新建文档、本设备创建过的文档） |
-| `/doc/new` | 新文档：空白编辑器，第一次保存时才真正创建，之后地址栏换成编辑链接 |
-| `/doc/{id}` | 只读链接 |
-| `/doc/{id}?key={editKey}` | 编辑链接 |
-
-最早这个功能放在主页项目 [self-page](../self-page) 里（`suolk.cc.cd/doc/...`），后来拆成了独立项目。旧链接由主页那边统一跳到本站首页，见下文「和主页的关系」。
+| 路径                      | 内容                                                               |
+| ------------------------- | ------------------------------------------------------------------ |
+| `/`                       | 文档首页（新建文档、本设备创建过的文档）                           |
+| `/doc/new`                | 新文档：空白编辑器，第一次保存时才真正创建，之后地址栏换成编辑链接 |
+| `/doc/{id}`               | 只读链接                                                           |
+| `/doc/{id}?key={editKey}` | 编辑链接                                                           |
 
 ## 目录
 
-| 路径 | 用途 |
-|---|---|
-| `public/` | 静态文件（文档首页、编辑页、样式、脚本） |
-| `functions/` | 接口（Pages Functions），按文件路径自动成为路由 |
-| `lib/store.js` | 所有数据库读写（含 D1 表结构）都在这里 |
-| `lib/util.js` | 接口共用的工具。`lib/` 放在 `functions/` 外面，否则也会被当成路由 |
-| `scripts/build.mjs` | 生成要发布的 `dist/`（`npm run build`，Cloudflare 构建时自动执行） |
-| `scripts/vendor.mjs` | 把第三方依赖从 `node_modules` 复制到 `public/vendor/`（自托管，见下文） |
-| `package.json` | 第三方依赖的版本（Vditor 编辑器、Lucide 图标），以及本地调试用的绑定参数 |
+| 路径                 | 用途                                                                     |
+| -------------------- | ------------------------------------------------------------------------ |
+| `public/`            | 静态文件（文档首页、编辑页、样式、脚本）                                 |
+| `functions/`         | 接口（Pages Functions），按文件路径自动成为路由                          |
+| `lib/store.js`       | 所有数据库读写（含 D1 表结构）都在这里                                   |
+| `lib/util.js`        | 接口共用的工具。`lib/` 放在 `functions/` 外面，否则也会被当成路由        |
+| `scripts/build.mjs`  | 生成要发布的 `dist/`（`npm run build`，Cloudflare 构建时自动执行）       |
+| `scripts/vendor.mjs` | 把第三方依赖从 `node_modules` 复制到 `public/vendor/`（自托管，见下文）  |
+| `package.json`       | 第三方依赖的版本（Vditor 编辑器、Lucide 图标），以及本地调试用的绑定参数 |
 
-仓库里**故意没有 `wrangler.toml`**：有了它 Pages 会以它为准，数据库 ID 就得写进这个公开仓库。现在构建设置和绑定都在 Dashboard 里配（见下文），不要把它加回来。
+仓库里**故意没有 `wrangler.toml`**：有了它 Pages 会以它为准，数据库 ID 就得写进仓库。现在构建设置和绑定都在 Dashboard 里配（见下文），不要把它加回来。
 
 ## 部署
 
-Pages 项目连着 GitHub 仓库 [F1n6RaD1us/Scratchpad](https://github.com/F1n6RaD1us/Scratchpad)，**推送到 `main` 就会自动部署**，一两分钟后生效。部署进度和构建日志在 Pages 项目 →「部署」里看。
+把 GitHub 仓库连到 Cloudflare Pages 之后（步骤见下文），**推送到 `main` 就会自动部署**，一两分钟后生效。部署进度和构建日志在 Pages 项目 →「部署」里看。
 
 云端构建时 Cloudflare 会先自动 `npm ci` 装依赖，再执行 `npm run build`，然后发布 `dist/`：
 
@@ -40,17 +38,19 @@ Pages 项目连着 GitHub 仓库 [F1n6RaD1us/Scratchpad](https://github.com/F1n6
 
 ### 第一次：建 Pages 项目、绑数据库和域名（只做一次）
 
-1. dash.cloudflare.com → **Workers & Pages** → 创建 → **Pages** → **导入现有 Git 存储库**，选 `F1n6RaD1us/Scratchpad`
-2. 项目名随意（比如 `suolk-docs`），它只决定 `xxx.pages.dev` 这个默认地址，建好后不能改
-3. 构建设置：
+1. 把代码放到你自己的 GitHub 仓库（fork 这个仓库，或者复制一份推上去）
+2. dash.cloudflare.com → **存储和数据库 → D1** → 创建数据库，名字随意（比如 `shared-docs`）。不用建表，代码第一次访问时会自动建好
+3. **Workers & Pages** → 创建 → **Pages** → **导入现有 Git 存储库**，选第 1 步的仓库
+4. 项目名随意，它只决定 `xxx.pages.dev` 这个默认地址，建好后不能改
+5. 构建设置：
    - 框架预设：**None**
    - 构建命令：**`npm run build`**
-   - 构建输出目录：**`dist`**
+   - 构建输出目录：**`dist`**（不要用默认的 `/`，否则会把整个仓库发布出去，首页反而是 404）
    - 根目录、环境变量：留空
-4. **保存并部署**。这次部署能成功，但打开文档会提示「没有绑定 D1 数据库」，因为还没绑，继续下一步
-5. 进入项目 → **设置 → 绑定** → 添加 → **D1 数据库**：变量名 **`DB`**（一字不差），数据库选 **`self-page`**。不用建表，代码第一次访问时会自动建好
-6. 绑定只对**之后的**部署生效：项目 → **部署** → 最新那次部署右边的 **⋯** → **重试部署**
-7. 项目 → **自定义域** → 添加 `docs.suolk.cc.cd`
+6. **保存并部署**。这次部署能成功，但打开文档会提示「没有绑定 D1 数据库」，因为还没绑，继续下一步
+7. 进入项目 → **设置 → 绑定** → 添加 → **D1 数据库**：变量名 **`DB`**（一字不差），数据库选第 2 步建的那个
+8. 绑定只对**之后的**部署生效：项目 → **部署** → 最新那次部署右边的 **⋯** → **重试部署**
+9. （可选）项目 → **自定义域** → 添加你自己的域名
 
 绑定分「生产」和「预览」两套环境。只往 `main` 推送的话只用得到生产环境；如果以后推送别的分支，那些分支会部署到预览环境，要在预览环境里同样绑一次才能用（绑同一个数据库的话，预览环境写的就是线上数据）。
 
@@ -60,10 +60,10 @@ Pages 项目连着 GitHub 仓库 [F1n6RaD1us/Scratchpad](https://github.com/F1n6
 
 站点不从任何外部 CDN 加载东西，第三方文件都放在自己的 `/vendor/` 下：
 
-| 依赖 | 用途 |
-|---|---|
-| [Vditor](https://github.com/Vanessa219/vditor) | 文档编辑器和只读页的渲染 |
-| [Lucide](https://lucide.dev/) | 图标（只复制 `site.css` 里用到的） |
+| 依赖                                           | 用途                               |
+| ---------------------------------------------- | ---------------------------------- |
+| [Vditor](https://github.com/Vanessa219/vditor) | 文档编辑器和只读页的渲染           |
+| [Lucide](https://lucide.dev/)                  | 图标（只复制 `site.css` 里用到的） |
 
 版本写在 `package.json`，`scripts/vendor.mjs` 负责把用得到的文件复制到 `public/vendor/`（不进 git，构建和本地调试时自动生成）。
 
@@ -102,23 +102,20 @@ npm run dev
 - 两个人同时改时，后保存的人会收到提示，选择覆盖或加载最新版本
 - 没有登录系统：拿到编辑链接的人就能编辑；文档也没有删除功能
 
-## 和主页的关系
+## 自定义
 
-两个项目完全独立，互不引用文件。主页只是在卡片上放了个链接，另外负责旧链接的跳转：旧地址 `suolk.cc.cd/doc` 和 `/doc/*` 在主页的 `_redirects` 里一律 301 到本站首页。
-
-拆分前后的旧文档（包括更早存在 KV 里的）已经全部清空，所以旧链接不再对应到具体文档，也不再把旧域名下「我创建的文档」列表搬过来。
-
-两个站点的样式表各有一份，改配色的话记得两边一起改。
+- 文档首页右上角的「返回主页」按钮写在 `public/index.html` 里，链接指向作者的个人主页。自己部署时改成你的网址，不需要就删掉这一行
+- 配色在 `public/assets/site.css` 开头的 CSS 变量里，浅色 / 深色两套主题各一组基础色，其余颜色都由它们推算
 
 ## 数据存在哪里
 
-| 位置 | 内容 |
-|---|---|
-| **Cloudflare D1**（绑定名 `DB`） | 所有文档数据，表结构见 `lib/store.js`。在 Dashboard 的 D1 → 该数据库 → 控制台里可以直接写 SQL 查询 |
-| 　`docs` 表 | 当前内容、编辑密钥、更新时间 |
-| 　`history` 表 | 历史版本，每篇最多 50 条 |
-| 　`presence` 表 | 在线心跳，离线超过 1 分钟的记录会被顺手清掉 |
-| **访客浏览器 localStorage** | 「我创建的文档」列表（含编辑密钥）、匿名 ID、明暗和编辑模式偏好。只在那台设备上，清浏览器数据就没了 |
+| 位置                             | 内容                                                                                                |
+| -------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Cloudflare D1**（绑定名 `DB`） | 所有文档数据，表结构见 `lib/store.js`。在 Dashboard 的 D1 → 该数据库 → 控制台里可以直接写 SQL 查询  |
+| `docs` 表                        | 当前内容、编辑密钥、更新时间                                                                        |
+| `history` 表                     | 历史版本，每篇最多 50 条                                                                            |
+| `presence` 表                    | 在线心跳，离线超过 1 分钟的记录会被顺手清掉                                                         |
+| **访客浏览器 localStorage**      | 「我创建的文档」列表（含编辑密钥）、匿名 ID、明暗和编辑模式偏好。只在那台设备上，清浏览器数据就没了 |
 
 编辑密钥只存在数据库和创建者的浏览器里，丢了就无法再编辑，可以在 D1 控制台里查回来：
 
@@ -126,22 +123,22 @@ npm run dev
 SELECT edit_key FROM docs WHERE id = '文档ID';
 ```
 
-D1 自带「时间旅行」：可以把整个数据库恢复到过去某个时间点（免费版 7 天内，付费版 30 天内），误操作了能救回来。恢复要用命令行（会覆盖当前数据，先看清楚再执行）：
+D1 自带「时间旅行」：可以把整个数据库恢复到过去某个时间点（免费版 7 天内，付费版 30 天内），误操作了能救回来。恢复要用命令行，先 `npx wrangler login` 登录 Cloudflare，再执行下面的命令（`<数据库名>` 换成你建的 D1 数据库名；会覆盖当前数据，先看清楚再执行）：
 
 ```bash
-npx wrangler d1 time-travel restore self-page --timestamp=2026-09-25T08:00:00+08:00
+npx wrangler d1 time-travel restore <数据库名> --timestamp=2026-09-25T08:00:00+08:00
 ```
 
 ## 接口
 
-| 接口 | 说明 |
-|---|---|
-| `POST /api/doc` | 新建文档，body `{ content, anonId? }`，返回 `docId`、`editKey`、`updatedAt`。前端在新文档第一次保存时才调用 |
-| `GET /api/doc/:docId` | 读取内容（不返回 editKey） |
-| `POST /api/doc/:docId` | 保存，body `{ editKey, content, baseUpdatedAt?, anonId? }`；别人先改过则返回 409 |
-| `GET /api/doc/:docId/history` | 历史版本列表；`?at=<updatedAt>` 取某个版本全文 |
-| `POST /api/presence/:docId` | 心跳，body `{ anonId }`，同时返回在线人数 |
-| `GET /api/presence/:docId` | 只读取在线人数（前端没用到，心跳接口已经顺带返回） |
+| 接口                          | 说明                                                                                                        |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `POST /api/doc`               | 新建文档，body `{ content, anonId? }`，返回 `docId`、`editKey`、`updatedAt`。前端在新文档第一次保存时才调用 |
+| `GET /api/doc/:docId`         | 读取内容（不返回 editKey）                                                                                  |
+| `POST /api/doc/:docId`        | 保存，body `{ editKey, content, baseUpdatedAt?, anonId? }`；别人先改过则返回 409                            |
+| `GET /api/doc/:docId/history` | 历史版本列表；`?at=<updatedAt>` 取某个版本全文                                                              |
+| `POST /api/presence/:docId`   | 心跳，body `{ anonId }`，同时返回在线人数                                                                   |
+| `GET /api/presence/:docId`    | 只读取在线人数（前端没用到，心跳接口已经顺带返回）                                                          |
 
 接口出错时统一返回 `{ error: "..." }`。
 
