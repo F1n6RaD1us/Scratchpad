@@ -5,10 +5,11 @@
 | 路径 | 内容 |
 |---|---|
 | `/` | 文档首页（新建文档、本设备创建过的文档） |
+| `/doc/new` | 新文档：空白编辑器，第一次保存时才真正创建，之后地址栏换成编辑链接 |
 | `/doc/{id}` | 只读链接 |
 | `/doc/{id}?key={editKey}` | 编辑链接 |
 
-最早这个功能放在主页项目 [self-page](../self-page) 里（`suolk.cc.cd/doc/...`），后来拆成了独立项目。旧链接由主页那边负责跳转过来，见下文「和主页的关系」。
+最早这个功能放在主页项目 [self-page](../self-page) 里（`suolk.cc.cd/doc/...`），后来拆成了独立项目。旧链接由主页那边统一跳到本站首页，见下文「和主页的关系」。
 
 ## 目录
 
@@ -16,7 +17,7 @@
 |---|---|
 | `public/` | 静态文件（文档首页、编辑页、样式、脚本） |
 | `functions/` | 接口（Pages Functions），按文件路径自动成为路由 |
-| `lib/store.js` | 所有数据库读写（D1 表结构、旧 KV 数据迁移）都在这里 |
+| `lib/store.js` | 所有数据库读写（含 D1 表结构）都在这里 |
 | `lib/util.js` | 接口共用的工具。`lib/` 放在 `functions/` 外面，否则也会被当成路由 |
 | `scripts/build.mjs` | 生成要发布的 `dist/`（`npm run build`，Cloudflare 构建时自动执行） |
 | `scripts/vendor.mjs` | 把第三方依赖从 `node_modules` 复制到 `public/vendor/`（自托管，见下文） |
@@ -47,9 +48,7 @@ Pages 项目连着 GitHub 仓库 [F1n6RaD1us/Scratchpad](https://github.com/F1n6
    - 构建输出目录：**`dist`**
    - 根目录、环境变量：留空
 4. **保存并部署**。这次部署能成功，但打开文档会提示「没有绑定 D1 数据库」，因为还没绑，继续下一步
-5. 进入项目 → **设置 → 绑定**，添加两个绑定（变量名必须一字不差）：
-   - **D1 数据库**：变量名 **`DB`**，数据库选 **`self-page`**。不用建表，代码第一次访问时会自动建好
-   - **KV 命名空间**：变量名 **`DOCS`**，选早期版本用的那个命名空间（用来把还没迁移的旧文档搬进 D1，见下文「数据存在哪里」）
+5. 进入项目 → **设置 → 绑定** → 添加 → **D1 数据库**：变量名 **`DB`**（一字不差），数据库选 **`self-page`**。不用建表，代码第一次访问时会自动建好
 6. 绑定只对**之后的**部署生效：项目 → **部署** → 最新那次部署右边的 **⋯** → **重试部署**
 7. 项目 → **自定义域** → 添加 `docs.suolk.cc.cd`
 
@@ -86,12 +85,13 @@ npm install
 npm run dev
 ```
 
-打开 http://localhost:8788 。本地用的是模拟的 D1 和 KV（绑定写在 `package.json` 的 `dev` 命令参数里），数据存在 `.wrangler/state/`（已被 git 忽略），和线上互不相通，可以随便折腾。
+打开 http://localhost:8788 。本地用的是模拟的 D1（绑定写在 `package.json` 的 `dev` 命令参数里），数据存在 `.wrangler/state/`（已被 git 忽略），和线上互不相通，可以随便折腾。
 
 查看本地数据库：因为没有 `wrangler.toml`，`wrangler d1 execute --local` 用不了。可以直接用 SQLite 工具（比如 [DB Browser for SQLite](https://sqlitebrowser.org/)）打开 `.wrangler/state/v3/d1/miniflare-D1DatabaseObject/` 下那个名字很长的 `.sqlite` 文件（不是 `metadata.sqlite`）。
 
 ## 功能
 
+- 点「新建文档」打开的是空白编辑器，第一次保存时才在服务器上创建（同时出现链接栏和「历史」）；什么都没写就关掉，不会留下任何记录
 - 编辑器是 Vditor，默认「所见即所得」（像 Word，不会 Markdown 也能用），工具栏里可切换「即时渲染」「分屏预览」，选择会记住
 - 停止输入 1.5 秒后自动保存（Ctrl+S 立即保存）；可以导入或拖入 `.md` 文件，从网页 / Word 粘贴会尽量保留格式
 - 下载为 `.md`；需要 PDF 的话用浏览器打印（Ctrl+P → 另存为 PDF），打印时只输出文档正文
@@ -104,11 +104,9 @@ npm run dev
 
 ## 和主页的关系
 
-两个项目完全独立，互不引用文件。主页只是在卡片上放了个链接，另外负责旧链接的跳转：
+两个项目完全独立，互不引用文件。主页只是在卡片上放了个链接，另外负责旧链接的跳转：旧地址 `suolk.cc.cd/doc` 和 `/doc/*` 在主页的 `_redirects` 里一律 301 到本站首页。
 
-- 旧链接 `suolk.cc.cd/doc/...` 会先打开主页上的搬家页（`self-page/public/doc-moved.html`），再跳到本站同一篇文档
-- 跳转时顺便把那台设备上「我创建的文档」列表（含编辑链接）放在网址 `#` 后面带过来：浏览器的本地存储按域名隔离，不这样的话换了域名列表就看不到了。`#` 后面的内容不会发给任何服务器
-- 本站由 `public/assets/import-mine.js` 接收：**只接受从 suolk.cc.cd 跳转过来的**（检查来源页面），并逐条校验格式，别人构造的链接没法往你的列表里塞东西。读完立刻从地址栏清掉
+拆分前后的旧文档（包括更早存在 KV 里的）已经全部清空，所以旧链接不再对应到具体文档，也不再把旧域名下「我创建的文档」列表搬过来。
 
 两个站点的样式表各有一份，改配色的话记得两边一起改。
 
@@ -120,7 +118,6 @@ npm run dev
 | 　`docs` 表 | 当前内容、编辑密钥、更新时间 |
 | 　`history` 表 | 历史版本，每篇最多 50 条 |
 | 　`presence` 表 | 在线心跳，离线超过 1 分钟的记录会被顺手清掉 |
-| Cloudflare KV（绑定名 `DOCS`） | 早期版本的数据。D1 里找不到某篇文档时会来这里找，找到就连同历史版本自动搬进 D1。只读，原数据不会被删除或修改；确认旧文档都打开过一遍之后，才可以解除这个绑定 |
 | **访客浏览器 localStorage** | 「我创建的文档」列表（含编辑密钥）、匿名 ID、明暗和编辑模式偏好。只在那台设备上，清浏览器数据就没了 |
 
 编辑密钥只存在数据库和创建者的浏览器里，丢了就无法再编辑，可以在 D1 控制台里查回来：
@@ -139,7 +136,7 @@ npx wrangler d1 time-travel restore self-page --timestamp=2026-09-25T08:00:00+08
 
 | 接口 | 说明 |
 |---|---|
-| `POST /api/doc` | 新建文档，返回 `docId`、`editKey` |
+| `POST /api/doc` | 新建文档，body `{ content, anonId? }`，返回 `docId`、`editKey`、`updatedAt`。前端在新文档第一次保存时才调用 |
 | `GET /api/doc/:docId` | 读取内容（不返回 editKey） |
 | `POST /api/doc/:docId` | 保存，body `{ editKey, content, baseUpdatedAt?, anonId? }`；别人先改过则返回 409 |
 | `GET /api/doc/:docId/history` | 历史版本列表；`?at=<updatedAt>` 取某个版本全文 |

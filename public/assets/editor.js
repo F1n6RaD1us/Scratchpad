@@ -8,6 +8,16 @@
   const LINK_BAR_HIDDEN_KEY = 'shareddoc:linkBarHidden';
   const EDIT_MODE_KEY = 'shareddoc:editMode';
 
+  // 新文档的初始内容。原样不动就不会保存，服务器上也就不会建这篇文档
+  const WELCOME = `# 新文档
+
+像写 Word 一样直接编辑，上方工具栏可以设置标题、**加粗**、列表、表格等。
+
+- 停止输入 1.5 秒后自动保存，也可以按 Ctrl+S
+- 可以从网页或 Word 里复制内容粘贴进来，格式会尽量保留
+- 会写 Markdown 的话，可以在工具栏里切换到「分屏预览」模式
+`;
+
   // Vditor 运行时按需加载的文件（解析引擎、语言包、主题等）和主文件在同一个自托管目录下
   const VDITOR_CDN = document.querySelector('script[src*="/vendor/vditor-"]').src.replace(/\/dist\/.*$/, '');
   const CONTENT_THEME_PATH = `${VDITOR_CDN}/dist/css/content-theme`;
@@ -28,8 +38,9 @@
   const els = Object.fromEntries([...document.querySelectorAll('[id]')].map((el) => [el.id, el]));
 
   const params = new URLSearchParams(location.search);
-  const docId = location.pathname.split('/')[2] || '';
-  const viewUrl = `${location.origin}/doc/${docId}`;
+  // /doc/new 是还没保存过的新文档（docId 为 null）：第一次保存时才在服务器上创建，
+  // 拿到 docId 后地址栏换成正式的编辑链接（见 onCreated）
+  let docId = location.pathname === '/doc/new' ? null : location.pathname.split('/')[2] || '';
 
   // 匿名身份：用于在线人数统计，以及让服务器把同一个人的连续保存合并成一个历史版本
   let anonId = localStorage.getItem('shareddoc:anonId');
@@ -72,7 +83,12 @@
 
   const renderInto = (el, md) => Vditor.preview(el, md, previewOptions());
   const currentContent = () => (state.canEdit ? vditor.getValue() : state.savedContent);
-  const isDirty = () => state.canEdit && vditor.getValue() !== state.savedContent;
+  // 新文档被清空了不算改动：空白内容不值得建一篇文档
+  function isDirty() {
+    if (!state.canEdit) return false;
+    const content = vditor.getValue();
+    return content !== state.savedContent && (docId !== null || content.trim() !== '');
+  }
 
   function setStatus(text, isError = false) {
     els.status.textContent = text;
@@ -218,6 +234,20 @@
     localStorage.setItem(MY_DOCS_KEY, JSON.stringify(docs));
   }
 
+  // 新文档第一次保存成功：换成正式的编辑链接，记进“我创建的文档”，展开链接栏，开始同步
+  function onCreated(data) {
+    docId = data.docId;
+    state.editKey = data.editKey;
+    history.replaceState(null, '', `/doc/${docId}?key=${encodeURIComponent(state.editKey)}`);
+
+    const docs = JSON.parse(localStorage.getItem(MY_DOCS_KEY) || '[]');
+    localStorage.setItem(MY_DOCS_KEY, JSON.stringify([{ docId, editKey: state.editKey, createdAt: Date.now() }, ...docs]));
+
+    els.historyBtn.hidden = els.linksBtn.hidden = false;
+    setupLinkBar(true);
+    startSync();
+  }
+
   // ---------- 保存 ----------
 
   async function save() {
@@ -225,16 +255,19 @@
     if (!state.canEdit || state.saving) return; // 保存中又有输入的话，保存完会再排一次自动保存
 
     const content = vditor.getValue();
-    if (content === state.savedContent) return setStatus('已保存');
+    if (!isDirty()) return setStatus(docId === null ? '尚未保存' : '已保存');
 
     state.saving = true;
     setStatus('保存中…');
-    const res = await api(`/api/doc/${docId}`, {
-      editKey: state.editKey,
-      content,
-      baseUpdatedAt: state.updatedAt,
-      anonId,
-    }).catch(() => null);
+    const res = await (docId === null
+      ? api('/api/doc', { content, anonId })
+      : api(`/api/doc/${docId}`, {
+        editKey: state.editKey,
+        content,
+        baseUpdatedAt: state.updatedAt,
+        anonId,
+      })
+    ).catch(() => null);
     state.saving = false;
 
     if (!res) return setStatus('保存失败：网络错误', true);
@@ -245,6 +278,7 @@
     }
     if (!res.ok) return setStatus(`保存失败：${res.data.error || res.status}`, true);
 
+    if (docId === null) onCreated(res.data);
     state.savedContent = content;
     setUpdatedAt(res.data.updatedAt);
     rememberTitle(content);
@@ -323,7 +357,7 @@
 
   els.downloadBtn.onclick = () => {
     const content = currentContent();
-    const name = (docTitle(content) || docId).replace(/[\\/:*?"<>|]/g, '_');
+    const name = (docTitle(content) || docId || '新文档').replace(/[\\/:*?"<>|]/g, '_');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }));
     a.download = `${name}.md`;
@@ -354,13 +388,9 @@
   els.copyEditLink.onclick = () => copyText(els.editLinkInput.value, els.copyEditLink);
   for (const input of [els.viewLinkInput, els.editLinkInput]) input.onfocus = () => input.select();
 
-  function setupLinkBar() {
-    // 刚新建的文档：强制展开链接栏并提示保存编辑链接
-    const isNew = params.has('new');
-    if (isNew) {
-      params.delete('new');
-      history.replaceState(null, '', `${location.pathname}?${params}`);
-    }
+  // isNew：刚创建的文档，强制展开链接栏并提示保存编辑链接
+  function setupLinkBar(isNew = false) {
+    const viewUrl = `${location.origin}/doc/${docId}`;
     els.viewLinkInput.value = viewUrl;
     els.editLinkInput.value = `${viewUrl}?key=${encodeURIComponent(state.editKey)}`;
     els.linkHint.hidden = !isNew;
@@ -421,7 +451,7 @@
 
   // 心跳接口本身会返回在线人数，所以一次请求同时完成“上报”和“拉取”
   async function heartbeat({ force = false } = {}) {
-    if (document.hidden && !force) return; // 后台标签页不上报，省 KV 读写
+    if (document.hidden && !force) return; // 后台标签页不上报，省数据库写入额度
     const res = await api(`/api/presence/${docId}`, { anonId }).catch(() => null);
     if (res?.ok) els.onlineCount.textContent = res.data.online;
   }
@@ -436,14 +466,28 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
+    if (document.hidden || !docId) return;
     heartbeat();
     refresh();
   });
 
+  function startSync() {
+    heartbeat({ force: true });
+    setInterval(heartbeat, PRESENCE_INTERVAL_MS);
+    setInterval(refresh, REFRESH_INTERVAL_MS);
+  }
+
   // ---------- 启动 ----------
 
   async function init() {
+    if (docId === null) {
+      // 新文档：还没有链接和历史，这两个按钮等第一次保存后再出现
+      els.historyBtn.hidden = els.linksBtn.hidden = true;
+      updateTitle(WELCOME);
+      await enterEditMode(WELCOME);
+      setStatus('尚未保存');
+      return;
+    }
     if (!docId) {
       els.preview.innerHTML = '<p>链接不完整。请从 <a href="/">文档首页</a> 新建或打开文档。</p>';
       return;
@@ -475,9 +519,7 @@
       applyRemote(content, updatedAt);
     }
 
-    heartbeat({ force: true });
-    setInterval(heartbeat, PRESENCE_INTERVAL_MS);
-    setInterval(refresh, REFRESH_INTERVAL_MS);
+    startSync();
   }
 
   init().catch(() => {

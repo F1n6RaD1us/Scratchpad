@@ -7,7 +7,6 @@
     <title>共享文档</title>
     <link rel="stylesheet" href="/assets/site.css" />
     <script src="/assets/theme.js"></script>
-    <script src="/assets/import-mine.js"></script>
 </head>
 
 <body class="glow">
@@ -28,8 +27,8 @@
             新建后会得到两个链接：<b>编辑链接</b>自己留着或发给协作者，<b>只读链接</b>可以随便分享。谁拿到编辑链接谁就能改。
         </p>
 
-        <button class="btn btn-primary btn-lg" id="createBtn"><i class="icon i-plus"></i><span>新建文档</span></button>
-        <p class="form-error" id="error" hidden></p>
+        <!-- 打开的是空白编辑器，第一次保存时才真正创建文档（见 editor.js） -->
+        <a class="btn btn-primary btn-lg" href="/doc/new"><i class="icon i-plus"></i><span>新建文档</span></a>
 
         <div class="features">
             <div class="feature">
@@ -99,25 +98,6 @@
                 return li;
             }));
         }
-
-        document.getElementById('createBtn').onclick = async (e) => {
-            const btn = e.currentTarget;
-            const errEl = document.getElementById('error');
-            btn.disabled = true;
-            errEl.hidden = true;
-            try {
-                const res = await fetch('/api/doc', { method: 'POST', signal: AbortSignal.timeout(20000) });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.error || `服务器返回 ${res.status}`);
-
-                saveMine([{ docId: data.docId, editKey: data.editKey, createdAt: Date.now() }, ...loadMine()]);
-                location.href = `/doc/${data.docId}?key=${encodeURIComponent(data.editKey)}&new=1`;
-            } catch (err) {
-                errEl.textContent = '创建失败：' + (err.name === 'TimeoutError' ? '请求超时，请重试' : err.message);
-                errEl.hidden = false;
-                btn.disabled = false;
-            }
-        };
 
         renderMine();
     </script>
