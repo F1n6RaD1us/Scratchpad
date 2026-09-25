@@ -83,6 +83,9 @@
 
     <!-- 只在打印（Ctrl+P / 另存为 PDF）时显示：打印前填入当前文档，界面其余部分全部隐藏 -->
     <article class="vditor-reset print-only" id="printArea"></article>
+    <!-- 打印时代码高亮一律用浅色主题：深色模式下 Vditor 加载的 github-dark 是浅色字，印在白纸上看不清。
+         放在 <body> 里是为了排在 Vditor 插到 <head> 末尾的高亮样式之后，两套主题选择器相同，以这里为准 -->
+    <link rel="stylesheet" media="print" href="/vendor/vditor-4.0.0/dist/js/highlight.js/styles/github.min.css" />
 
     <dialog class="drawer" id="historyDialog">
         <header class="drawer-head">

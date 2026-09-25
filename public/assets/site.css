@@ -803,6 +803,7 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
 }
 
 @media print {
+  /* 代码高亮的配色另见 editor.html 里 media="print" 的 github.min.css */
   :root,
   :root[data-theme="dark"] {
     color-scheme: light;
