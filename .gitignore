@@ -11,8 +11,5 @@ desktop.ini
 node_modules/
 dist/
 
-# build-zip.bat 的打包产物，随时可以重新生成
-/shared-docs.zip
-
 # scripts/vendor.mjs 从 node_modules 复制过来的第三方文件
 public/vendor/

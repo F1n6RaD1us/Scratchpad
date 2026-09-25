@@ -18,36 +18,44 @@
 | `functions/` | 接口（Pages Functions），按文件路径自动成为路由 |
 | `lib/store.js` | 所有数据库读写（D1 表结构、旧 KV 数据迁移）都在这里 |
 | `lib/util.js` | 接口共用的工具。`lib/` 放在 `functions/` 外面，否则也会被当成路由 |
-| `build-zip.bat` / `scripts/build-zip.mjs` | 打包成 Dashboard 上传用的 `shared-docs.zip` |
+| `scripts/build.mjs` | 生成要发布的 `dist/`（`npm run build`，Cloudflare 构建时自动执行） |
 | `scripts/vendor.mjs` | 把第三方依赖从 `node_modules` 复制到 `public/vendor/`（自托管，见下文） |
-| `package.json` | 第三方依赖的版本（Vditor 编辑器、Lucide 图标） |
-| `wrangler.toml` | 本地调试用的配置 |
+| `package.json` | 第三方依赖的版本（Vditor 编辑器、Lucide 图标），以及本地调试用的绑定参数 |
+
+仓库里**故意没有 `wrangler.toml`**：有了它 Pages 会以它为准，数据库 ID 就得写进这个公开仓库。现在构建设置和绑定都在 Dashboard 里配（见下文），不要把它加回来。
 
 ## 部署
 
+Pages 项目连着 GitHub 仓库 [F1n6RaD1us/Scratchpad](https://github.com/F1n6RaD1us/Scratchpad)，**推送到 `main` 就会自动部署**，一两分钟后生效。部署进度和构建日志在 Pages 项目 →「部署」里看。
+
+云端构建时 Cloudflare 会先自动 `npm ci` 装依赖，再执行 `npm run build`，然后发布 `dist/`：
+
+- `public/` 里的所有文件都会发布，不需要维护清单
+- 第三方文件（Vditor、图标）从 `node_modules` 复制进来，见下文「第三方依赖」
+- 给 HTML 里引用的 `/assets/*` 加上内容哈希（`site.css?v=…`）：Cloudflare 默认让浏览器缓存 CSS/JS 4 小时，不加的话部署后访客可能拿到“新 HTML + 旧 CSS”
+- `functions/` 由 Pages 自己编译，并自动生成 `_routes.json`，只让接口和文档页走 Worker，其余请求直接按静态文件返回
+
+想在本地确认构建结果，可以自己运行 `npm run build` 看看 `dist/`（已被 git 忽略）。
+
 ### 第一次：建 Pages 项目、绑数据库和域名（只做一次）
 
-1. 双击 **`build-zip.bat`**，生成 `shared-docs.zip`
-2. dash.cloudflare.com → **Workers & Pages** → 创建 → **Pages** → **上传资产**，项目名随意（比如 `suolk-docs`），上传 `shared-docs.zip`
-3. 进入新项目 → **设置 → 绑定**，添加两个绑定：
-   - **D1 数据库**：变量名 **`DB`**，选已有的那个数据库。不用建表，代码第一次访问时会自动建好
-   - **KV 命名空间**：变量名 **`DOCS`**，选早期版本用的那个命名空间（用来把还没迁移的旧文档搬进 D1，见下文）
-   - 变量名必须一字不差；如果也用预览环境，预览环境里同样加一次
-4. 绑定只对**之后的**部署生效，所以**再上传一次** `shared-docs.zip`
-5. 项目 → **自定义域** → 添加 `docs.suolk.cc.cd`
+1. dash.cloudflare.com → **Workers & Pages** → 创建 → **Pages** → **导入现有 Git 存储库**，选 `F1n6RaD1us/Scratchpad`
+2. 项目名随意（比如 `suolk-docs`），它只决定 `xxx.pages.dev` 这个默认地址，建好后不能改
+3. 构建设置：
+   - 框架预设：**None**
+   - 构建命令：**`npm run build`**
+   - 构建输出目录：**`dist`**
+   - 根目录、环境变量：留空
+4. **保存并部署**。这次部署能成功，但打开文档会提示「没有绑定 D1 数据库」，因为还没绑，继续下一步
+5. 进入项目 → **设置 → 绑定**，添加两个绑定（变量名必须一字不差）：
+   - **D1 数据库**：变量名 **`DB`**，数据库选 **`self-page`**。不用建表，代码第一次访问时会自动建好
+   - **KV 命名空间**：变量名 **`DOCS`**，选早期版本用的那个命名空间（用来把还没迁移的旧文档搬进 D1，见下文「数据存在哪里」）
+6. 绑定只对**之后的**部署生效：项目 → **部署** → 最新那次部署右边的 **⋯** → **重试部署**
+7. 项目 → **自定义域** → 添加 `docs.suolk.cc.cd`
 
-没绑 D1 也能部署成功，但页面会显示「没有绑定 D1 数据库」，补上绑定后重新上传一次就好。
+绑定分「生产」和「预览」两套环境。只往 `main` 推送的话只用得到生产环境；如果以后推送别的分支，那些分支会部署到预览环境，要在预览环境里同样绑一次才能用（绑同一个数据库的话，预览环境写的就是线上数据）。
 
-### 每次修改后
-
-1. 双击 **`build-zip.bat`**（需要装 [Node.js](https://nodejs.org/)），生成 `shared-docs.zip`
-2. Pages 项目 → **部署** → **创建新部署** → 上传 `shared-docs.zip`
-
-第一次打包会先自动 `npm ci` 装依赖，之后就不用了。
-不需要维护打包清单：`public/` 里的所有文件都会被打包。打包时还会：
-
-- 用 wrangler 把 `functions/` 编译成 `_worker.js`：Dashboard 上传不会编译 `functions/` 目录，但认 `_worker.js`。同时生成的 `_routes.json` 只让接口和文档页走 Worker，其余请求直接按静态文件返回
-- 给 HTML 里引用的 `/assets/*` 加上内容哈希（`site.css?v=…`）：Cloudflare 默认让浏览器缓存 CSS/JS 4 小时，不加的话部署后访客可能拿到“新 HTML + 旧 CSS”
+以后要换数据库或改构建设置，也是在 **设置** 里改，改完同样要重试一次部署才生效。
 
 ### 第三方依赖（自托管）
 
@@ -58,11 +66,11 @@
 | [Vditor](https://github.com/Vanessa219/vditor) | 文档编辑器和只读页的渲染 |
 | [Lucide](https://lucide.dev/) | 图标（只复制 `site.css` 里用到的） |
 
-版本写在 `package.json`，`scripts/vendor.mjs` 负责把用得到的文件复制到 `public/vendor/`（不进 git，打包和本地调试时自动生成）。
+版本写在 `package.json`，`scripts/vendor.mjs` 负责把用得到的文件复制到 `public/vendor/`（不进 git，构建和本地调试时自动生成）。
 
 Vditor 只带了常用部分（解析引擎、中文界面、代码高亮、KaTeX 数学公式），没带 mermaid 流程图、echarts 图表等十几 MB 的大件，文档里出现这类代码块时按普通代码显示。
 
-**升级 Vditor**：改 `package.json` 里的版本号，`npm install`，再把 `public/editor.html` 里两处 `/vendor/vditor-x.y.z/` 改成新版本（改漏了打包会报错提醒）。
+**升级 Vditor**：改 `package.json` 里的版本号，`npm install`，再把 `public/editor.html` 里两处 `/vendor/vditor-x.y.z/` 改成新版本（改漏了构建会报错提醒）。
 
 ## 本地调试
 
@@ -78,13 +86,9 @@ npm install
 npm run dev
 ```
 
-打开 http://localhost:8788 。本地用的是模拟的 D1 和 KV，数据存在 `.wrangler/state/`（已被 git 忽略），和线上互不相通，可以随便折腾。
+打开 http://localhost:8788 。本地用的是模拟的 D1 和 KV（绑定写在 `package.json` 的 `dev` 命令参数里），数据存在 `.wrangler/state/`（已被 git 忽略），和线上互不相通，可以随便折腾。
 
-查看本地数据库：
-
-```bash
-npx wrangler d1 execute self-page --local --command "SELECT id, updated_at FROM docs"
-```
+查看本地数据库：因为没有 `wrangler.toml`，`wrangler d1 execute --local` 用不了。可以直接用 SQLite 工具（比如 [DB Browser for SQLite](https://sqlitebrowser.org/)）打开 `.wrangler/state/v3/d1/miniflare-D1DatabaseObject/` 下那个名字很长的 `.sqlite` 文件（不是 `metadata.sqlite`）。
 
 ## 功能
 

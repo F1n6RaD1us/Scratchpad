@@ -1,5 +1,5 @@
 // 自托管第三方依赖：把 node_modules 里用得到的文件复制到 public/vendor/（已 gitignore）。
-// build-zip.mjs 打包前会自动运行；本地调试用 npm run dev，也会先跑这一步。
+// build.mjs 构建前会自动运行；本地调试用 npm run dev，也会先跑这一步。
 import { cpSync, readFileSync, rmSync } from 'node:fs';
 
 const OUT = 'public/vendor';
