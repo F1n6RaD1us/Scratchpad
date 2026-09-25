@@ -15,7 +15,7 @@ rmSync('dist', { recursive: true, force: true, maxRetries: 5 }); // Windows 上�
 cpSync('public', 'dist', { recursive: true });
 
 // 给 HTML 里引用的 /assets/* 加上内容哈希，如 /assets/site.css?v=ac7dfde4。
-// Cloudflare 默认让浏览器把 CSS/JS 缓存 4 小时，不加的话部署后访客会拿到“新 HTML + 旧 CSS”；
+// 绑了自定义域名后，域名的「浏览器缓存 TTL」（默认 4 小时）会让浏览器直接用旧 CSS/JS，不加的话部署后访客会拿到“新 HTML + 旧 CSS”；
 // 加了之后文件一改地址就变，部署立即生效。只改 dist/ 里的副本，public/ 源文件不动。
 const hashOf = (name) => createHash('sha256').update(readFileSync(`dist/assets/${name}`)).digest('hex').slice(0, 8);
 for (const file of readdirSync('dist', { recursive: true })) {

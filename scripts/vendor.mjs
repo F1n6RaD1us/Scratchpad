@@ -31,8 +31,10 @@ for (const file of VDITOR_FILES) {
   cpSync(`node_modules/vditor/dist/${file}`, `${OUT}/${vditor}/dist/${file}`, { recursive: true });
 }
 
+// editor.html 里每一处 Vditor 路径都要是已安装的版本，改漏一处也报错
 const html = readFileSync('public/editor.html', 'utf8');
-if (!html.includes(`/vendor/${vditor}/`)) {
+const refs = [...html.matchAll(/\/vendor\/(vditor-[^/]+)\//g)].map((m) => m[1]);
+if (!refs.length || refs.some((ref) => ref !== vditor)) {
   throw new Error(`public/editor.html 里引用的 Vditor 路径和已安装的版本（${vditor}）不一致，请同步修改`);
 }
 
