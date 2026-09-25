@@ -8,7 +8,6 @@ export async function onRequestGet({ params, env, request }) {
   const { docId } = params;
   if (!isValidId(docId)) return error('无效的文档 ID', 400);
 
-  // 先读一次文档：既判断存不存在，也会把还在 KV 里的旧文档连同历史搬进 D1
   if (!(await getDoc(env, docId))) return error('文档不存在', 404);
 
   const at = new URL(request.url).searchParams.get('at');
