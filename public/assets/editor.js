@@ -402,6 +402,9 @@ flowchart TD
       const rendered = els.editorPane.querySelectorAll(RENDERED);
       const sources = els.printArea.querySelectorAll(RENDERED);
       if (rendered.length === sources.length) sources.forEach((el, i) => (el.innerHTML = rendered[i].innerHTML));
+      // 代码也没有高亮，按只读页的方式补上。编辑区显示代码块时已经加载过高亮脚本，打印排版前就能完成。
+      // style 要传当前主题，否则 Vditor 会把页面上的高亮样式也换掉
+      Vditor.highlightRender({ defaultLang: '', style: themes().code }, els.printArea, VDITOR_CDN);
     } else {
       els.printArea.innerHTML = els.preview.innerHTML;
     }
