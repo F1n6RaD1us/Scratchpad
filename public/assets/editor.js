@@ -2,8 +2,9 @@
   'use strict';
 
   const AUTOSAVE_DELAY_MS = 1500;  // 停止输入多久后自动保存
-  const PRESENCE_INTERVAL_MS = 5000;
-  const REFRESH_INTERVAL_MS = 30000; // 拉取别人保存的新内容
+  // 心跳间隔。一次心跳同时上报在线、拿到在线人数、得知别人有没有保存新内容，
+  // 每次都算一次 Workers 请求，别调太密（服务器端的配套设置见 lib/util.js 的 PRESENCE_*）
+  const PRESENCE_INTERVAL_MS = 15000;
   const MY_DOCS_KEY = 'shareddoc:mine';
   const LINK_BAR_HIDDEN_KEY = 'shareddoc:linkBarHidden';
   const EDIT_MODE_KEY = 'shareddoc:editMode';
@@ -449,11 +450,13 @@
 
   // ---------- 在线人数 ----------
 
-  // 心跳接口本身会返回在线人数，所以一次请求同时完成“上报”和“拉取”
+  // 心跳接口同时返回在线人数和文档当前版本，版本变了才去拉全文
   async function heartbeat({ force = false } = {}) {
-    if (document.hidden && !force) return; // 后台标签页不上报，省数据库写入额度
+    if (document.hidden && !force) return; // 后台标签页不上报，省请求次数和写入额度
     const res = await api(`/api/presence/${docId}`, { anonId }).catch(() => null);
-    if (res?.ok) els.onlineCount.textContent = res.data.online;
+    if (!res?.ok) return;
+    els.onlineCount.textContent = res.data.online;
+    if (res.data.updatedAt !== state.updatedAt) refresh();
   }
 
   // ---------- 拉取别人保存的新内容 ----------
@@ -467,14 +470,12 @@
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden || !docId) return;
-    heartbeat();
-    refresh();
+    heartbeat(); // 切回来立刻报一次，顺便检查离开期间有没有人保存
   });
 
   function startSync() {
     heartbeat({ force: true });
     setInterval(heartbeat, PRESENCE_INTERVAL_MS);
-    setInterval(refresh, REFRESH_INTERVAL_MS);
   }
 
   // ---------- 启动 ----------
