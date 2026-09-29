@@ -172,6 +172,37 @@ flowchart TD
     document.documentElement.style.setProperty('--chrome-height', `${els.chrome.offsetHeight}px`);
   }).observe(els.chrome);
 
+  // ---------- 文档内的锚点链接（手写的目录） ----------
+
+  // 锚点写法各家不同：GitHub 小写、去掉标点、空格变 -；Vditor 保留大小写、标点变 -。
+  // 编辑器里的标题 id 还带 wysiwyg- 前缀和 _编号 后缀，按 id 永远找不到。
+  // 所以先按 id 精确找，找不到再把链接和标题文字都去掉空白、标点、大小写后比较
+  const anchorKey = (s) => s.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
+
+  function findAnchor(root, hash) {
+    let name = hash.slice(1);
+    try { name = decodeURIComponent(name); } catch { /* 不是合法的百分号编码，按原样找 */ }
+    const key = anchorKey(name);
+    if (!key) return null;
+    return root.querySelector(`[id="${CSS.escape(name)}"]`)
+      || [...root.querySelectorAll('h1, h2, h3, h4, h5, h6')].find((h) => anchorKey(h.textContent) === key);
+  }
+
+  // 返回 false 表示文档里没有这个锚点
+  function jumpToAnchor(root, hash) {
+    const target = findAnchor(root, hash);
+    target?.scrollIntoView({ block: 'start' });
+    return !!target;
+  }
+
+  // 只读页、历史预览是静态渲染的，链接交给浏览器处理；链接和标题 id 对不上时浏览器跳不过去，这里接管
+  for (const el of [els.preview, els.versionPreview]) {
+    el.addEventListener('click', (e) => {
+      const a = e.target.closest('a[href^="#"]');
+      if (a && jumpToAnchor(el, a.getAttribute('href'))) e.preventDefault();
+    });
+  }
+
   // ---------- 显示内容 ----------
 
   function setUpdatedAt(ts) {
@@ -222,6 +253,16 @@ flowchart TD
           markdown: { sanitize: true },
           math: { engine: 'KaTeX' },
           actions: [], // 分屏预览上方的“桌面 / 平板 / 手机 / 复制到公众号”那排按钮用不上
+        },
+        // Vditor 默认点任何链接都 window.open，站内锚点（#标题）会在新标签页里再开一遍当前文档。
+        // 改成锚点跳到编辑区里的标题，其他链接照旧在新标签页打开
+        link: {
+          click: (el) => {
+            // 所见即所得、分屏预览传进来的是 <a>，即时渲染模式传的是显示网址的那个 span
+            const href = el.tagName === 'A' ? el.getAttribute('href') : el.textContent;
+            if (href?.startsWith('#')) jumpToAnchor(el.closest('.vditor-reset'), href);
+            else if (href) window.open(href, '_blank', 'noopener');
+          },
         },
         input: (md) => {
           updateTitle(md);
