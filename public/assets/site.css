@@ -505,8 +505,13 @@ html .vditor-reset {
   font-family: var(--font);
 }
 
-html .vditor-reset a {
-  color: var(--coral-ink);
+html .vditor-reset a,
+.vditor-toc {
+  color: var(--coral-ink); /* [toc] 目录 Vditor 写死了蓝色 */
+}
+
+.vditor-toc span:hover {
+  text-decoration: underline;
 }
 
 html .vditor-reset blockquote {

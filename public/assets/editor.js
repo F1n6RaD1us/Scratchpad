@@ -102,7 +102,7 @@ flowchart TD
       mode: t.content,
       theme: { current: t.content, path: CONTENT_THEME_PATH },
       hljs: { style: t.code },
-      markdown: { sanitize: true }, // 过滤 <script>、onerror 之类，防止文档里夹带恶意代码
+      markdown: { sanitize: true, toc: true }, // sanitize 过滤 <script>、onerror 之类，防止文档里夹带恶意代码；toc 让 [toc] 生成目录
       math: { engine: 'KaTeX' },
       anchor: 0,
     };
@@ -195,9 +195,18 @@ flowchart TD
     return !!target;
   }
 
-  // 只读页、历史预览是静态渲染的，链接交给浏览器处理；链接和标题 id 对不上时浏览器跳不过去，这里接管
+  // 只读页、历史预览是静态渲染的，两种目录都在这里接管：
+  // - 手写的锚点链接由浏览器处理，链接和标题 id 对不上时浏览器跳不过去
+  // - [toc] 生成的目录由 Vditor 处理，但它滚动的是整个窗口，而这里滚动的是正文卡片，点了没反应。
+  //   这个监听器比 Vditor 的先注册，stopImmediatePropagation 挡掉它的处理，免得两边的滚动叠在一起
   for (const el of [els.preview, els.versionPreview]) {
     el.addEventListener('click', (e) => {
+      const tocItem = e.target.closest('.vditor-toc span[data-target-id]');
+      if (tocItem) {
+        e.stopImmediatePropagation();
+        el.querySelector(`[id="${CSS.escape(tocItem.dataset.targetId)}"]`)?.scrollIntoView({ block: 'start' });
+        return;
+      }
       const a = e.target.closest('a[href^="#"]');
       if (a && jumpToAnchor(el, a.getAttribute('href'))) e.preventDefault();
     });
@@ -250,7 +259,7 @@ flowchart TD
         preview: {
           theme: { current: t.content, path: CONTENT_THEME_PATH },
           hljs: { style: t.code },
-          markdown: { sanitize: true },
+          markdown: { sanitize: true, toc: true },
           math: { engine: 'KaTeX' },
           actions: [], // 分屏预览上方的“桌面 / 平板 / 手机 / 复制到公众号”那排按钮用不上
         },
