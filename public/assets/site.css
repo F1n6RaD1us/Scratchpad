@@ -1,4 +1,4 @@
-/* 共享文档样式：文档首页、文档页 */
+/* 共享文档样式：文档首页、文档页、管理后台 */
 
 /* 配色由 <html data-theme="light|dark"> 决定，见 theme.js。
    两套主题只换下面这组基础色，其余颜色都用 color-mix 从它们推出来 */
@@ -103,10 +103,14 @@ body.glow {
 .i-file { --i: url("/vendor/lucide/file-text.svg"); }
 .i-history { --i: url("/vendor/lucide/history.svg"); }
 .i-link { --i: url("/vendor/lucide/link.svg"); }
+.i-lock { --i: url("/vendor/lucide/lock.svg"); }
+.i-logout { --i: url("/vendor/lucide/log-out.svg"); }
 .i-pencil { --i: url("/vendor/lucide/pencil.svg"); }
 .i-plus { --i: url("/vendor/lucide/plus.svg"); }
+.i-refresh { --i: url("/vendor/lucide/refresh-cw.svg"); }
 .i-restore { --i: url("/vendor/lucide/rotate-ccw.svg"); }
 .i-save { --i: url("/vendor/lucide/save.svg"); }
+.i-search { --i: url("/vendor/lucide/search.svg"); }
 .i-trash { --i: url("/vendor/lucide/trash-2.svg"); }
 .i-upload { --i: url("/vendor/lucide/upload.svg"); }
 .i-users { --i: url("/vendor/lucide/users.svg"); }
@@ -754,6 +758,132 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
   font-size: 12px;
 }
 
+/* ---------- 管理后台 ---------- */
+
+.admin {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 48px 24px 96px;
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 380px;
+  margin: 48px auto 0;
+  padding: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+.login-card h1 {
+  font-size: 18px;
+}
+
+.login-card p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.login-card code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.login-card input,
+.search input {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px var(--font);
+}
+
+.login-card input:focus,
+.search input:focus {
+  outline: none;
+  border-color: var(--coral);
+}
+
+.login-card .login-error {
+  color: var(--danger);
+}
+
+.admin-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.admin-head h1 {
+  font-size: 20px;
+}
+
+.admin-head h1 small {
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search .icon {
+  position: absolute;
+  left: 10px;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.search input {
+  width: 240px;
+  height: 34px;
+  padding-left: 32px;
+  font-size: 13px;
+}
+
+.doc-info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-list .title {
+  flex: none;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.admin-list .title:hover {
+  color: var(--coral-ink);
+}
+
+.admin-list .title.untitled {
+  color: var(--muted);
+}
+
+.admin-list .doc-info small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- 窄屏 ---------- */
 
 @media (max-width: 900px) {
@@ -800,6 +930,25 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
 
   .drawer-body {
     flex-direction: column;
+  }
+
+  .admin {
+    padding: 24px 12px 64px;
+  }
+
+  .search,
+  .search input {
+    flex: 1;
+    width: auto;
+  }
+
+  .admin-list li {
+    flex-wrap: wrap;
+  }
+
+  .doc-info {
+    flex-basis: 100%;
+    margin-bottom: 4px;
   }
 
   .version-list {

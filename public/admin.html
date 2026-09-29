@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>管理后台 · 共享文档</title>
+    <link rel="stylesheet" href="/assets/site.css" />
+    <script src="/assets/theme.js"></script>
+</head>
+
+<body class="glow">
+    <header class="topbar">
+        <a class="logo" href="/">
+            <span class="logo-mark"><i class="icon i-file"></i></span>
+            <span class="logo-text">共享文档</span>
+        </a>
+        <span class="pill editing"><i class="icon i-lock"></i><span class="pill-label">管理后台</span></span>
+        <span class="spacer"></span>
+        <button class="btn" id="logoutBtn" title="退出管理后台" hidden><i class="icon i-logout"></i><span>退出</span></button>
+        <button class="btn btn-icon" onclick="toggleTheme()" title="切换夜间模式"><i class="icon i-theme"></i></button>
+    </header>
+
+    <main class="admin">
+        <form class="login-card" id="loginForm" hidden>
+            <span class="icon-tile"><i class="icon i-lock"></i></span>
+            <h1>管理后台</h1>
+            <p>输入管理密码（Pages 项目里设置的 <code>ADMIN_PASSWORD</code>）。</p>
+            <input type="password" id="password" placeholder="管理密码" autocomplete="current-password" required />
+            <p class="login-error" id="loginError" hidden></p>
+            <button class="btn btn-primary" type="submit"><span>进入</span></button>
+        </form>
+
+        <section id="panel" hidden>
+            <div class="admin-head">
+                <h1>全部文档 <small id="count"></small></h1>
+                <span class="spacer"></span>
+                <label class="search">
+                    <i class="icon i-search"></i>
+                    <input type="search" id="search" placeholder="搜索标题或 ID" />
+                </label>
+                <button class="btn btn-outline btn-icon" id="refreshBtn" title="刷新"><i class="icon i-refresh"></i></button>
+            </div>
+            <ul class="doc-list admin-list" id="docList"></ul>
+            <p class="hint">删除是永久的：文档和全部历史版本都会删掉，只能用 D1 的「时间旅行」把整个数据库恢复到删除之前。</p>
+        </section>
+    </main>
+
+    <script>
+        // 密码只存在这个标签页里（sessionStorage），关掉标签页就要重新输入
+        const PASSWORD_KEY = 'shareddoc:admin';
+        const $ = (id) => document.getElementById(id);
+        let docs = [];
+
+        async function api(path, method = 'GET') {
+            const password = sessionStorage.getItem(PASSWORD_KEY) || '';
+            const res = await fetch(path, {
+                method,
+                headers: { authorization: `Bearer ${encodeURIComponent(password)}` },
+                signal: AbortSignal.timeout(20000),
+            });
+            const data = await res.json().catch(() => ({}));
+            return { ok: res.ok, status: res.status, data };
+        }
+
+        function showLogin(message) {
+            $('panel').hidden = $('logoutBtn').hidden = true;
+            $('loginForm').hidden = false;
+            $('loginError').hidden = !message;
+            $('loginError').textContent = message || '';
+            $('password').focus();
+        }
+
+        async function load() {
+            const { ok, status, data } = await api('/api/admin/docs').catch(() => ({ data: { error: '网络超时或服务器没有响应' } }));
+            if (!ok) {
+                if (status === 401) sessionStorage.removeItem(PASSWORD_KEY);
+                showLogin(data.error || `加载失败（${status}）`);
+                return;
+            }
+            docs = data.docs;
+            $('loginForm').hidden = true;
+            $('panel').hidden = $('logoutBtn').hidden = false;
+            render();
+        }
+
+        function button(tag, className, icon, label, title) {
+            const el = document.createElement(tag);
+            el.className = `btn ${className}`;
+            el.innerHTML = `<i class="icon ${icon}"></i>${label ? `<span>${label}</span>` : ''}`;
+            if (title) el.title = title;
+            return el;
+        }
+
+        const editUrl = (d) => `${location.origin}/doc/${d.id}?key=${encodeURIComponent(d.editKey)}`;
+
+        function render() {
+            const q = $('search').value.trim().toLowerCase();
+            const shown = q ? docs.filter((d) => d.title.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)) : docs;
+            $('count').textContent = q ? `${shown.length} / ${docs.length}` : docs.length;
+
+            if (shown.length === 0) {
+                const li = document.createElement('li');
+                li.className = 'empty';
+                li.textContent = docs.length ? '没有匹配的文档' : '数据库里还没有文档';
+                $('docList').replaceChildren(li);
+                return;
+            }
+
+            $('docList').replaceChildren(...shown.map((d) => {
+                const title = document.createElement('a');
+                title.className = 'title';
+                title.href = `/doc/${d.id}`;
+                title.target = '_blank';
+                title.textContent = d.title || '无标题';
+                title.classList.toggle('untitled', !d.title);
+
+                const meta = document.createElement('small');
+                meta.textContent = `${d.id} · 更新于 ${new Date(d.updatedAt).toLocaleString()} · ${d.length} 字 · ${d.versions} 个历史版本`;
+
+                const info = document.createElement('div');
+                info.className = 'doc-info';
+                info.append(title, meta);
+
+                const edit = button('a', 'btn-outline', 'i-pencil', '编辑');
+                edit.href = editUrl(d);
+                edit.target = '_blank';
+
+                const view = button('a', '', 'i-eye', '只读');
+                view.href = `/doc/${d.id}`;
+                view.target = '_blank';
+
+                const copy = button('button', 'btn-icon', 'i-copy', '', '复制编辑链接');
+                copy.onclick = async () => {
+                    await navigator.clipboard.writeText(editUrl(d));
+                    copy.classList.add('active');
+                    copy.title = '已复制';
+                    setTimeout(() => {
+                        copy.classList.remove('active');
+                        copy.title = '复制编辑链接';
+                    }, 1500);
+                };
+
+                const remove = button('button', 'btn-icon btn-danger', 'i-trash', '', '永久删除');
+                remove.onclick = async () => {
+                    if (!confirm(`永久删除「${d.title || d.id}」？\n文档和全部历史版本都会删掉，拿着链接的人也打不开了。`)) return;
+                    remove.disabled = true;
+                    const res = await api(`/api/admin/docs/${d.id}`, 'DELETE').catch(() => null);
+                    // 404 说明已经不在了，同样从列表里去掉
+                    if (res?.ok || res?.status === 404) {
+                        docs = docs.filter((x) => x.id !== d.id);
+                        render();
+                    } else {
+                        remove.disabled = false;
+                        alert(`删除失败：${res?.data.error || '网络超时或服务器没有响应'}`);
+                    }
+                };
+
+                const li = document.createElement('li');
+                li.append(info, edit, view, copy, remove);
+                return li;
+            }));
+        }
+
+        $('loginForm').onsubmit = (e) => {
+            e.preventDefault();
+            sessionStorage.setItem(PASSWORD_KEY, $('password').value);
+            $('password').value = '';
+            load();
+        };
+
+        $('logoutBtn').onclick = () => {
+            sessionStorage.removeItem(PASSWORD_KEY);
+            docs = [];
+            $('docList').replaceChildren();
+            showLogin();
+        };
+
+        $('search').oninput = render;
+        $('refreshBtn').onclick = load;
+
+        if (sessionStorage.getItem(PASSWORD_KEY)) load();
+        else showLogin();
+    </script>
+</body>
+
+</html>
