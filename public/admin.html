@@ -42,8 +42,14 @@
                 </label>
                 <button class="btn btn-outline btn-icon" id="refreshBtn" title="刷新"><i class="icon i-refresh"></i></button>
             </div>
+            <!-- 图片不会自动删除：上传超过一年的只在这里列出来，点按钮才删 -->
+            <div class="image-stats" id="imageStats" hidden>
+                <i class="icon i-image"></i>
+                <span class="image-stats-text" id="imageStatsText"></span>
+                <button class="btn btn-outline btn-danger" id="purgeImagesBtn" hidden><i class="icon i-trash"></i><span>删除过期图片</span></button>
+            </div>
             <ul class="doc-list admin-list" id="docList"></ul>
-            <p class="hint">删除是永久的：文档和全部历史版本都会删掉，只能用 D1 的「时间旅行」把整个数据库恢复到删除之前。</p>
+            <p class="hint">删除是永久的：文档、全部历史版本和上传的图片都会删掉，只能用 D1 的「时间旅行」把整个数据库恢复到删除之前。</p>
         </section>
     </main>
 
@@ -52,6 +58,7 @@
         const PASSWORD_KEY = 'shareddoc:admin';
         const $ = (id) => document.getElementById(id);
         let docs = [];
+        let images = null; // 上传到本站的图片统计，见 /api/admin/docs
 
         async function api(path, method = 'GET') {
             const password = sessionStorage.getItem(PASSWORD_KEY) || '';
@@ -80,6 +87,7 @@
                 return;
             }
             docs = data.docs;
+            images = data.images;
             $('loginForm').hidden = true;
             $('panel').hidden = $('logoutBtn').hidden = false;
             render();
@@ -93,9 +101,24 @@
             return el;
         }
 
+        const formatSize = (bytes) => (bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${Number((bytes / 1024 / 1024).toFixed(1))} MB`);
+
+        function renderImages() {
+            $('imageStats').hidden = !images.count;
+            if (!images.count) return;
+            const expired = images.expiredCount > 0;
+            $('imageStats').classList.toggle('expired', expired);
+            $('purgeImagesBtn').hidden = !expired;
+            $('imageStatsText').textContent = `上传到本站的图片：${images.count} 张，共 ${formatSize(images.bytes)}（上限 ${formatSize(images.limit)}）。`
+                + (expired
+                    ? `其中 ${images.expiredCount} 张已上传超过一年（共 ${formatSize(images.expiredBytes)}），可以删除。`
+                    : '没有上传超过一年的图片。');
+        }
+
         const editUrl = (d) => `${location.origin}/doc/${d.id}?key=${encodeURIComponent(d.editKey)}`;
 
         function render() {
+            renderImages();
             const q = $('search').value.trim().toLowerCase();
             const shown = q ? docs.filter((d) => d.title.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)) : docs;
             $('count').textContent = q ? `${shown.length} / ${docs.length}` : docs.length;
@@ -117,7 +140,7 @@
                 title.classList.toggle('untitled', !d.title);
 
                 const meta = document.createElement('small');
-                meta.textContent = `${d.id} · 更新于 ${new Date(d.updatedAt).toLocaleString()} · ${d.length} 字 · ${d.versions} 个历史版本`;
+                meta.textContent = `${d.id} · 更新于 ${new Date(d.updatedAt).toLocaleString()} · ${d.length} 字 · ${d.versions} 个历史版本${d.images ? ` · ${d.images} 张图片` : ''}`;
 
                 const info = document.createElement('div');
                 info.className = 'doc-info';
@@ -144,13 +167,14 @@
 
                 const remove = button('button', 'btn-icon btn-danger', 'i-trash', '', '永久删除');
                 remove.onclick = async () => {
-                    if (!confirm(`永久删除「${d.title || d.id}」？\n文档和全部历史版本都会删掉，拿着链接的人也打不开了。`)) return;
+                    if (!confirm(`永久删除「${d.title || d.id}」？\n文档、全部历史版本和上传的图片都会删掉，拿着链接的人也打不开了。`)) return;
                     remove.disabled = true;
                     const res = await api(`/api/admin/docs/${d.id}`, 'DELETE').catch(() => null);
                     // 404 说明已经不在了，同样从列表里去掉
                     if (res?.ok || res?.status === 404) {
                         docs = docs.filter((x) => x.id !== d.id);
-                        render();
+                        if (d.images) load(); // 它的图片也删了，重新统计图片
+                        else render();
                     } else {
                         remove.disabled = false;
                         alert(`删除失败：${res?.data.error || '网络超时或服务器没有响应'}`);
@@ -175,6 +199,16 @@
             docs = [];
             $('docList').replaceChildren();
             showLogin();
+        };
+
+        $('purgeImagesBtn').onclick = async () => {
+            if (!confirm(`永久删除 ${images.expiredCount} 张上传超过一年的图片（共 ${formatSize(images.expiredBytes)}）？\n引用这些图片的文档里，图片会显示不出来。`)) return;
+            $('purgeImagesBtn').disabled = true;
+            const res = await api('/api/admin/images', 'DELETE').catch(() => null);
+            $('purgeImagesBtn').disabled = false;
+            if (!res?.ok) return alert(`删除失败：${res?.data.error || '网络超时或服务器没有响应'}`);
+            alert(`已删除 ${res.data.deleted} 张图片`);
+            load(); // 重新统计，各文档的图片数也跟着变
         };
 
         $('search').oninput = render;

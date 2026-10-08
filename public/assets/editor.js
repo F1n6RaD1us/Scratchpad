@@ -49,14 +49,24 @@ flowchart TD
     },
   };
 
+  // 「插入图片」按钮：填网络图片的网址，或者上传到本站（见下文「插入图片」）。
+  // 不用 Vditor 自带的上传：它不能先让用户在两种来源之间选择、确认知道上传的图片可能被删除
+  const IMAGE_BUTTON = {
+    name: 'insert-image',
+    tip: '插入图片',
+    tipPosition: 's',
+    icon: '<i class="icon i-image"></i>',
+    click: () => openImageDialog(),
+  };
+
   // 工具栏：常用格式 + 模式切换；上传、导出、emoji 等用不上的没放。手机屏幕窄，只留最常用的。
   // 提示气泡默认往上弹，会被编辑区卡片的上沿裁掉，所以改成往下（tipPosition: 's'）
   const TOOLBAR = (matchMedia('(max-width: 720px)').matches
-    ? ['headings', 'bold', 'italic', 'list', 'ordered-list', 'check', 'link', 'table', 'undo', 'redo', 'edit-mode']
+    ? ['headings', 'bold', 'italic', 'list', 'ordered-list', 'check', 'link', IMAGE_BUTTON, 'table', 'undo', 'redo', 'edit-mode']
     : [
       'headings', 'bold', 'italic', 'strike', '|',
       'list', 'ordered-list', 'check', 'quote', 'line', '|',
-      'link', 'table', FLOWCHART_BUTTON, 'code', 'inline-code', '|',
+      'link', IMAGE_BUTTON, 'table', FLOWCHART_BUTTON, 'code', 'inline-code', '|',
       'undo', 'redo', '|',
       'edit-mode', 'outline', 'fullscreen',
     ]).map((item) => (typeof item === 'string' && item !== '|' ? { name: item, tipPosition: 's' } : item));
@@ -327,12 +337,13 @@ flowchart TD
 
   // ---------- 保存 ----------
 
-  async function save() {
+  // create：新文档没改过也立即创建（上传图片要先有文档）
+  async function save({ create = false } = {}) {
     clearTimeout(state.autosaveTimer);
     if (!state.canEdit || state.saving) return; // 保存中又有输入的话，保存完会再排一次自动保存
 
     const content = vditor.getValue();
-    if (!isDirty()) return setStatus(docId === null ? '尚未保存' : '已保存');
+    if (!isDirty() && !(create && docId === null)) return setStatus(docId === null ? '尚未保存' : '已保存');
 
     state.saving = true;
     setStatus('保存中…');
@@ -418,19 +429,230 @@ flowchart TD
     if (file) importText(await file.text());
   };
 
-  // 把 .md 文件拖进编辑区当作导入；其他文件（比如图片）交给 Vditor 自己处理
+  // 把 .md 文件拖进编辑区当作导入；图片文件打开「插入图片」对话框（见 takeImageFile），其他文件交给 Vditor 自己处理
   els.editorPane.addEventListener('dragover', (e) => {
     if (e.dataTransfer.types.includes('Files')) els.editorPane.classList.add('dragover');
   }, true);
   els.editorPane.addEventListener('dragleave', () => els.editorPane.classList.remove('dragover'), true);
   els.editorPane.addEventListener('drop', async (e) => {
     els.editorPane.classList.remove('dragover');
+    if (takeImageFile(e, e.dataTransfer)) return;
     const file = [...e.dataTransfer.files].find((f) => /\.(md|markdown|txt)$/i.test(f.name));
     if (!file) return;
     e.preventDefault();
     e.stopPropagation();
     importText(await file.text());
   }, true);
+  els.editorPane.addEventListener('paste', (e) => takeImageFile(e, e.clipboardData), true);
+
+  // ---------- 插入图片 ----------
+
+  // 文档是在线分享的，电脑上的图片路径（C:\...、./img.png）别人打不开。图片有两种来源，由用户在对话框里选：
+  // - 网络图片：填别的网站上的图片网址，只要那个网站不删就一直能看
+  // - 上传到本站：存在 D1 里，上传超过一年的可能被管理员在后台清理（不会自动删），上传前要勾选知道这一点
+  const IMAGE_MAX_SIDE = 1920;         // 上传前把长边缩到这么大
+  const IMAGE_MAX_BYTES = 1024 * 1024; // 和 lib/util.js 的 MAX_IMAGE_BYTES 一致
+
+  const image = { source: 'url', file: null, previewUrl: null, busy: false };
+
+  const formatSize = (bytes) => (bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${Number((bytes / 1024 / 1024).toFixed(1))} MB`);
+
+  // 粘贴、拖入的图片文件 Vditor 默认会转成 base64 写进文档正文，很快就撑到 1MB 上限，
+  // 每次保存、同步、存历史版本也都要带着它，所以改成打开对话框的「上传到本站」。
+  // 只管纯图片文件：从网页上复制的图片同时带着 HTML（<img src="网址">），Vditor 会按网址插入，不用管
+  function takeImageFile(e, data) {
+    if (data.getData('text/html')) return false;
+    const file = [...data.files].find((f) => f.type.startsWith('image/'));
+    if (!file) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    openImageDialog(file);
+    return true;
+  }
+
+  // 只接受 http(s) 网址，返回规范化后的地址，不合格返回 null
+  function imageUrl(text) {
+    try {
+      const url = new URL(text.trim());
+      return /^https?:$/.test(url.protocol) ? url.href : null;
+    } catch {
+      return null;
+    }
+  }
+
+  let imagePreviewTimer = null;
+
+  function previewImage() {
+    clearTimeout(imagePreviewTimer);
+    if (image.source === 'upload') {
+      if (!image.file) return note(els.imagePreview, '选择图片后在这里预览');
+      const img = new Image();
+      img.onerror = () => note(els.imagePreview, '浏览器显示不了这张图片，可能是不支持的格式');
+      img.src = image.previewUrl;
+      return els.imagePreview.replaceChildren(img);
+    }
+
+    const url = imageUrl(els.imageUrlInput.value);
+    if (!url) return note(els.imagePreview, els.imageUrlInput.value.trim() ? '请填写 http:// 或 https:// 开头的网址' : '填好网址后在这里预览');
+    // 等输入停一下再加载，免得边打字边请求一堆不完整的地址
+    imagePreviewTimer = setTimeout(() => {
+      note(els.imagePreview, '加载中…');
+      const img = new Image();
+      // 加载完时网址可能已经改了，旧图片的结果就不要了
+      const current = () => image.source === 'url' && imageUrl(els.imageUrlInput.value) === url;
+      img.onload = () => {
+        if (current()) els.imagePreview.replaceChildren(img);
+      };
+      img.onerror = () => {
+        if (current()) note(els.imagePreview, '图片加载失败：检查网址是否正确，或者对方网站不允许别的网站引用它的图片');
+      };
+      img.src = url;
+    }, 300);
+  }
+
+  function setImageSource(source) {
+    image.source = source;
+    for (const btn of els.imageSource.children) btn.classList.toggle('active', btn.dataset.source === source);
+    els.imageUrlPanel.hidden = source !== 'url';
+    els.imageUploadPanel.hidden = source !== 'upload';
+    els.imageSubmitLabel.textContent = source === 'url' ? '插入' : '上传并插入';
+    els.imageError.hidden = true;
+    previewImage();
+  }
+
+  function setImageFile(file) {
+    if (image.previewUrl) URL.revokeObjectURL(image.previewUrl);
+    image.file = file;
+    image.previewUrl = file && URL.createObjectURL(file);
+    els.imageFileName.textContent = file
+      ? `${file.name || '粘贴的图片'}（${formatSize(file.size)}）`
+      : '也可以直接把图片粘贴或拖进编辑区';
+    previewImage();
+  }
+
+  function setImageBusy(busy) {
+    image.busy = busy;
+    els.imageSubmit.disabled = els.imageCancel.disabled = busy;
+    els.imageSubmitLabel.textContent = busy ? '上传中…' : '上传并插入';
+  }
+
+  function showImageError(message) {
+    els.imageError.textContent = message;
+    els.imageError.hidden = false;
+  }
+
+  // file：粘贴、拖进来的图片，直接打开「上传到本站」
+  function openImageDialog(file = null) {
+    // 「知道可能被删除」在同一个页面里勾过一次就不用再勾
+    const accepted = els.imageAccept.checked;
+    els.imageForm.reset();
+    els.imageAccept.checked = accepted;
+    els.imageUrlInput.setCustomValidity('');
+    setImageFile(file);
+    setImageSource(file ? 'upload' : 'url');
+    els.imageDialog.showModal();
+  }
+
+  // 上传前压缩：缩到 IMAGE_MAX_SIDE 以内并转成 WebP，手机照片、截图一般只剩几百 KB。
+  // GIF 重新编码会变成静止图片，原样上传；浏览器解码不了的格式也原样上传，由服务器判断收不收
+  async function compressImage(file) {
+    if (file.type === 'image/gif') return file;
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(file);
+    } catch {
+      return file;
+    }
+    const scale = Math.min(1, IMAGE_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.85));
+    // 不支持 WebP 编码的浏览器会退回 PNG，可能反而比原图大；原图是服务器不收的格式（比如 BMP）时只能用转换后的
+    const supported = ['image/png', 'image/jpeg', 'image/webp'].includes(file.type);
+    return blob && (!supported || blob.size < file.size) ? blob : file;
+  }
+
+  // 返回图片的完整网址；失败时抛出可以直接显示给用户的错误
+  async function uploadImage() {
+    if (docId === null) await save({ create: true }); // 新文档要先在服务器上建好，图片才有地方挂
+    if (docId === null) throw new Error('文档还没保存成功，请稍后再试');
+
+    const blob = await compressImage(image.file);
+    if (blob.size > IMAGE_MAX_BYTES) throw new Error(`图片压缩后仍有 ${formatSize(blob.size)}，超过 1 MB 上限`);
+    const form = new FormData();
+    form.append('editKey', state.editKey);
+    form.append('file', blob);
+    const res = await fetch(`/api/doc/${docId}/images`, { method: 'POST', body: form, signal: AbortSignal.timeout(30000) })
+      .catch(() => { throw new Error('上传失败：网络错误或超时'); });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`上传失败：${data.error || res.status}`);
+    // 存完整网址：下载的 .md 文件在别处打开时图片也能显示
+    return new URL(data.url, location.origin).href;
+  }
+
+  els.imageSource.onclick = (e) => {
+    const btn = e.target.closest('[data-source]');
+    if (btn && !image.busy) setImageSource(btn.dataset.source);
+  };
+  els.imageUrlInput.oninput = () => {
+    els.imageUrlInput.setCustomValidity('');
+    previewImage();
+  };
+  els.imagePickBtn.onclick = () => els.imageFileInput.click();
+  els.imageFileInput.onchange = () => {
+    const file = els.imageFileInput.files[0];
+    els.imageFileInput.value = '';
+    if (file) setImageFile(file);
+  };
+  els.imageAccept.onchange = () => els.imageAccept.setCustomValidity('');
+  els.imageCancel.onclick = () => els.imageDialog.close();
+  // 点遮罩关闭。要用花括号：onclick 返回 false 会取消默认动作，「插入」按钮就提交不了表单了。
+  // 上传中不能关：传完会插进文档，中途关掉的话用户会以为已经取消了
+  els.imageDialog.onclick = (e) => {
+    if (e.target === els.imageDialog && !image.busy) els.imageDialog.close();
+  };
+  els.imageDialog.addEventListener('cancel', (e) => {
+    if (image.busy) e.preventDefault();
+  });
+  // 释放预览用的本地地址。close 事件是异步触发的，到的时候对话框可能已经重新打开了
+  els.imageDialog.addEventListener('close', () => {
+    if (!els.imageDialog.open) setImageFile(null);
+  });
+
+  els.imageForm.onsubmit = async (e) => {
+    e.preventDefault();
+    els.imageError.hidden = true;
+    let url;
+    if (image.source === 'url') {
+      url = imageUrl(els.imageUrlInput.value);
+      if (!url) {
+        els.imageUrlInput.setCustomValidity('请填写 http:// 或 https:// 开头的图片网址');
+        return els.imageUrlInput.reportValidity();
+      }
+    } else {
+      if (!image.file) return showImageError('请先选择图片');
+      if (!els.imageAccept.checked) {
+        els.imageAccept.setCustomValidity('上传前请先勾选这一项');
+        return els.imageAccept.reportValidity();
+      }
+      setImageBusy(true);
+      try {
+        url = await uploadImage();
+      } catch (err) {
+        return showImageError(err.message);
+      } finally {
+        setImageBusy(false);
+      }
+    }
+    els.imageDialog.close();
+    // 说明里的方括号、尖括号，网址里的括号会把 Markdown 语法截断，说明里的双引号会截断 Vditor 生成的 alt 属性。
+    // 说明里的这些字符直接去掉：用反斜杠转义的话，所见即所得模式插入时 Vditor 会解析错
+    const alt = els.imageAltInput.value.trim().replace(/[[\]\\<>"]/g, '');
+    vditor.insertMD(`![${alt}](${url.replaceAll('(', '%28').replaceAll(')', '%29')})`);
+  };
 
   els.downloadBtn.onclick = () => {
     const content = currentContent();

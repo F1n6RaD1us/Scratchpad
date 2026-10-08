@@ -102,6 +102,7 @@ body.glow {
 .i-eye { --i: url("/vendor/lucide/eye.svg"); }
 .i-file { --i: url("/vendor/lucide/file-text.svg"); }
 .i-history { --i: url("/vendor/lucide/history.svg"); }
+.i-image { --i: url("/vendor/lucide/image.svg"); }
 .i-link { --i: url("/vendor/lucide/link.svg"); }
 .i-lock { --i: url("/vendor/lucide/lock.svg"); }
 .i-logout { --i: url("/vendor/lucide/log-out.svg"); }
@@ -575,7 +576,8 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
   animation: drawer-in 0.22s ease-out;
 }
 
-.drawer::backdrop {
+.drawer::backdrop,
+.modal::backdrop {
   background: rgb(43 33 28 / 28%);
   backdrop-filter: blur(2px);
 }
@@ -655,6 +657,150 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
 
 .version-preview .doc-body {
   padding: 24px 32px;
+}
+
+/* ---------- 小对话框（插入图片） ---------- */
+
+.modal {
+  width: min(460px, calc(100vw - 32px));
+  margin: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+/* 内边距放在表单上：点到 dialog 本身只可能是点在遮罩上，据此点遮罩关闭 */
+.modal form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+}
+
+.modal h2 {
+  font-size: 15px;
+}
+
+.modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.image-preview {
+  display: grid;
+  place-items: center;
+  height: 180px;
+  overflow: hidden;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.image-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.image-preview .empty {
+  text-align: center;
+}
+
+.modal-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 分段切换（网络图片 / 上传到本站） */
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--chip);
+}
+
+.segmented button {
+  flex: 1;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: 500 13px var(--font);
+  cursor: pointer;
+}
+
+.segmented button.active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.file-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.file-pick span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.modal-notice {
+  padding: 10px 12px;
+  border: 1px solid var(--coral-line);
+  border-radius: 10px;
+  background: var(--coral-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.modal-notice b {
+  color: var(--coral-ink);
+}
+
+.modal label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.modal label.check input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  accent-color: var(--coral);
+}
+
+.modal-error {
+  color: var(--danger);
+  font-size: 13px;
 }
 
 /* ---------- 共享文档首页 ---------- */
@@ -800,6 +946,7 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
 }
 
 .login-card input,
+.modal input,
 .search input {
   height: 36px;
   padding: 0 12px;
@@ -811,6 +958,7 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
 }
 
 .login-card input:focus,
+.modal input:focus,
 .search input:focus {
   outline: none;
   border-color: var(--coral);
@@ -887,6 +1035,40 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 上传到本站的图片：总量，以及上传超过一年、可以清理的 */
+.image-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.image-stats > .icon {
+  color: var(--muted);
+}
+
+.image-stats.expired {
+  border-color: var(--coral-line);
+  background: var(--coral-soft);
+}
+
+.image-stats.expired > .icon {
+  color: var(--coral-ink);
+}
+
+.image-stats-text {
+  flex: 1;
+  min-width: 200px;
 }
 
 /* ---------- 窄屏 ---------- */
