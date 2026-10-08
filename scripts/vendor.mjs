@@ -44,9 +44,6 @@ for (const [from, to] of [
   // Mermaid 不跟着切深色主题，始终按浅色渲染：已经画好的图切换明暗时不会重画，
   // 深色模式下改由 site.css 用滤镜反色显示，打印时也就总是浅色
   ['"dark"===n&&(e.theme="dark"),', ''],
-  // 统计字数时只去掉了「所见即所得」模式里渲染好的图和公式，「即时渲染」模式下会把 SVG 里的样式代码也算进去
-  ['querySelectorAll(".vditor-wysiwyg__preview").forEach((function(e){e.remove()}))',
-    'querySelectorAll(".vditor-wysiwyg__preview,.vditor-ir__preview").forEach((function(e){e.remove()}))'],
 ]) {
   const count = js.split(from).length - 1;
   if (count !== 1) throw new Error(`${mainJs} 里应当恰好有 1 处 ${from}，实际 ${count} 处，请检查 Vditor 的写法是否变了`);

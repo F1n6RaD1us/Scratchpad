@@ -7,16 +7,21 @@
   const PRESENCE_INTERVAL_MS = 15000;
   const MY_DOCS_KEY = 'shareddoc:mine';
   const LINK_BAR_HIDDEN_KEY = 'shareddoc:linkBarHidden';
-  const EDIT_MODE_KEY = 'shareddoc:editMode';
+  // 编辑模式只留「分屏预览」（默认）和「所见即所得」。去掉的「即时渲染」和所见即所得差别不大，
+  // 两者都把行内 HTML（<font color> 之类）拆成单独的标签块，显示不出效果；分屏预览右边的渲染和只读页一样
+  const EDIT_MODES = ['sv', 'wysiwyg'];
+  // 换了键名：旧键每次关页面都存下当时的模式，老用户存的全是原来的默认值，沿用的话新默认对他们不生效
+  const EDIT_MODE_KEY = 'shareddoc:editorMode';
+  localStorage.removeItem('shareddoc:editMode');
 
   // 新文档的初始内容。原样不动就不会保存，服务器上也就不会建这篇文档
   const WELCOME = `# 新文档
 
-像写 Word 一样直接编辑，上方工具栏可以设置标题、**加粗**、列表、表格等。
+左边写 Markdown，右边实时显示排版效果。上方工具栏可以插入标题、**加粗**、列表、表格、图片等，不会 Markdown 也能用。
 
 - 停止输入 1.5 秒后自动保存，也可以按 Ctrl+S
 - 可以从网页或 Word 里复制内容粘贴进来，格式会尽量保留
-- 会写 Markdown 的话，可以在工具栏里切换到「分屏预览」模式
+- 想像写 Word 一样直接在排版效果上编辑，可以在工具栏的「切换编辑模式」里选「所见即所得」
 `;
 
   // Vditor 运行时按需加载的文件（解析引擎、语言包、主题等）和主文件在同一个自托管目录下
@@ -258,7 +263,7 @@ flowchart TD
       vditor = new Vditor('vditor', {
         cdn: VDITOR_CDN,
         lang: 'zh_CN',
-        mode: localStorage.getItem(EDIT_MODE_KEY) || 'wysiwyg',
+        mode: EDIT_MODES.includes(localStorage.getItem(EDIT_MODE_KEY)) ? localStorage.getItem(EDIT_MODE_KEY) : 'sv',
         value: content,
         height: '100%',
         theme: t.ui,
@@ -277,8 +282,7 @@ flowchart TD
         // 改成锚点跳到编辑区里的标题，其他链接照旧在新标签页打开
         link: {
           click: (el) => {
-            // 所见即所得、分屏预览传进来的是 <a>，即时渲染模式传的是显示网址的那个 span
-            const href = el.tagName === 'A' ? el.getAttribute('href') : el.textContent;
+            const href = el.getAttribute('href');
             if (href?.startsWith('#')) jumpToAnchor(el.closest('.vditor-reset'), href);
             else if (href) window.open(href, '_blank', 'noopener');
           },
@@ -300,7 +304,7 @@ flowchart TD
     });
   }
 
-  // 记住用户选的编辑模式（所见即所得 / 即时渲染 / 分屏），下次打开沿用
+  // 记住用户选的编辑模式（分屏预览 / 所见即所得），下次打开沿用
   addEventListener('pagehide', () => vditor && localStorage.setItem(EDIT_MODE_KEY, vditor.getCurrentMode()));
 
   addEventListener('themechange', () => {
@@ -374,18 +378,68 @@ flowchart TD
     else setStatus('已保存');
   }
 
-  async function resolveConflict(remote) {
-    const overwrite = confirm(
-      '在你编辑期间，别人保存了新版本。\n\n' +
-      '「确定」：用你的内容覆盖（对方的修改仍可在“历史”里找回）\n' +
-      '「取消」：放弃你的修改，加载最新版本'
-    );
-    if (overwrite) {
-      state.updatedAt = remote.updatedAt; // 基于最新版本再存一次
-      return save();
+  // 保存时发现别人在我编辑期间存了新版本：像 git 合并分支一样三方合并（见 merge.js），
+  // 底版是我开始改时的服务器版本。两人改的是不同段落就自动合并；改了同一段的，
+  // 两种写法都留在文档里，用 <<<<<<< ======= >>>>>>> 标出来，由人来挑。合并完立即保存，谁的修改都不会丢
+  function resolveConflict(remote) {
+    const { text, conflicts } = mergeText(state.savedContent, vditor.getValue(), remote.content);
+    state.savedContent = remote.content;
+    setUpdatedAt(remote.updatedAt);
+    setValueKeepingCaret(text);
+    updateTitle(text);
+    vditor.tip(conflicts
+      ? `别人刚保存了新版本，有 ${conflicts} 处和你改了同一段。两种写法都保留在文档里，用 <<<<<<< 和 >>>>>>> 标出，请留下需要的内容，再删掉标记`
+      : '别人刚保存了新版本，已和你的修改自动合并', conflicts ? 15000 : 4000);
+    save();
+  }
+
+  // 换掉编辑器全文时尽量让光标、滚动位置留在原处：记下光标前的一小段文字，
+  // 换完后在原位置附近找同样的文字，把光标放回它后面。找不到就算了，内容不受影响
+  function setValueKeepingCaret(md) {
+    const scrolls = [...els.editorPane.querySelectorAll('.vditor-sv, .vditor-wysiwyg, .vditor-preview')].map((el) => [el, el.scrollTop]);
+    // 分屏预览的编辑区是 <textarea>，所见即所得是可编辑的 <pre>
+    const active = document.activeElement;
+    const textarea = active?.matches('#editorPane textarea') ? active : null;
+    const sel = getSelection();
+    const node = !textarea && sel.rangeCount && els.editorPane.contains(sel.anchorNode) ? sel.anchorNode : null;
+    const root = node && (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement).closest('[contenteditable="true"]');
+    let before = null;
+    if (textarea) {
+      before = textarea.value.slice(0, textarea.selectionStart);
+    } else if (root) {
+      const range = document.createRange();
+      range.setStart(root, 0);
+      range.setEnd(sel.anchorNode, sel.anchorOffset);
+      before = range.toString();
     }
-    applyRemote(remote.content, remote.updatedAt);
-    setStatus('已加载最新版本');
+
+    vditor.setValue(md);
+    for (const [el, top] of scrolls) el.scrollTop = top;
+    if (before === null) return;
+
+    const text = textarea ? textarea.value : root.textContent;
+    const context = before.slice(-20);
+    let best = context ? -1 : 0;
+    for (let k = text.indexOf(context); context && k !== -1; k = text.indexOf(context, k + 1)) {
+      const end = k + context.length;
+      if (best === -1 || Math.abs(end - before.length) < Math.abs(best - before.length)) best = end;
+    }
+    if (best === -1) return;
+    if (textarea) return textarea.setSelectionRange(best, best);
+
+    // 把字符位置换算成具体的文字节点
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let rest = best;
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      if (rest <= t.data.length) {
+        const caret = document.createRange();
+        caret.setStart(t, rest);
+        sel.removeAllRanges();
+        sel.addRange(caret);
+        return;
+      }
+      rest -= t.data.length;
+    }
   }
 
   function scheduleAutosave() {
@@ -406,6 +460,11 @@ flowchart TD
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault();
       save();
+    }
+    // Vditor 切到即时渲染的快捷键（菜单里的按钮已经用 site.css 藏起来了）
+    if ((e.ctrlKey || e.metaKey) && e.altKey && e.code === 'Digit8') {
+      e.preventDefault();
+      e.stopPropagation();
     }
   }, true);
 

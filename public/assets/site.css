@@ -477,6 +477,11 @@ body.glow {
   content: "字数";
 }
 
+/* 「切换编辑模式」菜单里不提供即时渲染（原因见 editor.js 的 EDIT_MODES） */
+#editorPane button[data-mode="ir"] {
+  display: none;
+}
+
 /* 自己加的工具栏按钮（流程图）用站点的图标，大小和 Vditor 自带的一致 */
 .vditor-toolbar .icon {
   width: 15px;
