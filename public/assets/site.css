@@ -112,6 +112,7 @@ body.glow {
 .i-restore { --i: url("/vendor/lucide/rotate-ccw.svg"); }
 .i-save { --i: url("/vendor/lucide/save.svg"); }
 .i-search { --i: url("/vendor/lucide/search.svg"); }
+.i-share { --i: url("/vendor/lucide/share-2.svg"); }
 .i-trash { --i: url("/vendor/lucide/trash-2.svg"); }
 .i-upload { --i: url("/vendor/lucide/upload.svg"); }
 .i-users { --i: url("/vendor/lucide/users.svg"); }

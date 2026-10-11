@@ -174,12 +174,23 @@ flowchart TD
     return { ok: res.ok, status: res.status, data };
   }
 
+  // 复制成功时按钮文字变成「已复制」，同时高亮一下：窄屏上顶栏按钮只显示图标，看不到文字
   async function copyText(text, btn) {
-    await navigator.clipboard.writeText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      prompt('浏览器不允许自动复制，请手动复制：', text);
+      return;
+    }
     const label = btn.querySelector('span');
-    const original = label.textContent;
+    label.dataset.original ??= label.textContent; // 连点两下时不要把「已复制」当成原文
     label.textContent = '已复制';
-    setTimeout(() => (label.textContent = original), 1500);
+    btn.classList.add('active');
+    clearTimeout(btn.copiedTimer);
+    btn.copiedTimer = setTimeout(() => {
+      label.textContent = label.dataset.original;
+      btn.classList.remove('active');
+    }, 1500);
   }
 
   // 顶栏和提示条高度会变，编辑区高度要跟着变
@@ -760,6 +771,8 @@ flowchart TD
     els.linkBar.classList.remove('new');
   };
   els.copyViewLink.onclick = () => copyText(els.viewLinkInput.value, els.copyViewLink);
+  // 只读页的「复制链接」：只复制只读链接，不带地址栏里可能有的（无效的）编辑密钥
+  els.shareBtn.onclick = () => copyText(`${location.origin}/doc/${docId}`, els.shareBtn);
   els.copyEditLink.onclick = () => copyText(els.editLinkInput.value, els.copyEditLink);
   for (const input of [els.viewLinkInput, els.editLinkInput]) input.onfocus = () => input.select();
 
@@ -892,6 +905,7 @@ flowchart TD
       await enterEditMode(content);
     } else {
       applyRemote(content, updatedAt);
+      els.shareBtn.hidden = false; // 编辑模式下链接栏里已经有复制按钮
     }
 
     startSync();
