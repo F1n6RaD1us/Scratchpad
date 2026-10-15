@@ -1043,6 +1043,32 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
   white-space: nowrap;
 }
 
+/* 「打开」和「复制链接」两个按钮拼在一起 */
+.btn-pair {
+  display: inline-flex;
+}
+
+.btn-pair + .btn-pair {
+  margin-left: 4px;
+}
+
+.btn-pair .btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.btn-pair .btn:last-child {
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* 悬停时边框变色，提到上层才不会被旁边按钮的边框盖住一半 */
+.btn-pair .btn:hover,
+.btn-pair .btn.active {
+  position: relative;
+}
+
 /* 上传到本站的图片：总量，以及上传超过一年、可以清理的 */
 .image-stats {
   display: flex;

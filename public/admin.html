@@ -115,7 +115,37 @@
                     : '没有上传超过一年的图片。');
         }
 
-        const editUrl = (d) => `${location.origin}/doc/${d.id}?key=${encodeURIComponent(d.editKey)}`;
+        const viewUrl = (d) => `${location.origin}/doc/${d.id}`;
+        const editUrl = (d) => `${viewUrl(d)}?key=${encodeURIComponent(d.editKey)}`;
+
+        // 打开按钮和它右边的复制按钮拼成一组，一眼能看出复制的是哪个链接
+        function linkPair(icon, label, url, copyTitle) {
+            const open = button('a', 'btn-outline', icon, label);
+            open.href = url;
+            open.target = '_blank';
+
+            const copy = button('button', 'btn-outline btn-icon', 'i-copy', '', copyTitle);
+            copy.onclick = async () => {
+                try {
+                    await navigator.clipboard.writeText(url);
+                } catch {
+                    prompt('浏览器不允许自动复制，请手动复制：', url);
+                    return;
+                }
+                copy.classList.add('active');
+                copy.title = '已复制';
+                clearTimeout(copy.copiedTimer);
+                copy.copiedTimer = setTimeout(() => {
+                    copy.classList.remove('active');
+                    copy.title = copyTitle;
+                }, 1500);
+            };
+
+            const pair = document.createElement('span');
+            pair.className = 'btn-pair';
+            pair.append(open, copy);
+            return pair;
+        }
 
         function render() {
             renderImages();
@@ -146,24 +176,8 @@
                 info.className = 'doc-info';
                 info.append(title, meta);
 
-                const edit = button('a', 'btn-outline', 'i-pencil', '编辑');
-                edit.href = editUrl(d);
-                edit.target = '_blank';
-
-                const view = button('a', '', 'i-eye', '只读');
-                view.href = `/doc/${d.id}`;
-                view.target = '_blank';
-
-                const copy = button('button', 'btn-icon', 'i-copy', '', '复制编辑链接');
-                copy.onclick = async () => {
-                    await navigator.clipboard.writeText(editUrl(d));
-                    copy.classList.add('active');
-                    copy.title = '已复制';
-                    setTimeout(() => {
-                        copy.classList.remove('active');
-                        copy.title = '复制编辑链接';
-                    }, 1500);
-                };
+                const edit = linkPair('i-pencil', '编辑', editUrl(d), '复制编辑链接（拿到的人可以修改）');
+                const view = linkPair('i-eye', '只读', viewUrl(d), '复制只读链接（可以随便分享）');
 
                 const remove = button('button', 'btn-icon btn-danger', 'i-trash', '', '永久删除');
                 remove.onclick = async () => {
@@ -182,7 +196,7 @@
                 };
 
                 const li = document.createElement('li');
-                li.append(info, edit, view, copy, remove);
+                li.append(info, edit, view, remove);
                 return li;
             }));
         }
