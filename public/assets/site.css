@@ -96,11 +96,13 @@ body.glow {
 }
 
 .i-arrow-left { --i: url("/vendor/lucide/arrow-left.svg"); }
+.i-chevron { --i: url("/vendor/lucide/chevron-right.svg"); }
 .i-columns { --i: url("/vendor/lucide/columns-2.svg"); }
 .i-copy { --i: url("/vendor/lucide/copy.svg"); }
 .i-download { --i: url("/vendor/lucide/download.svg"); }
 .i-eye { --i: url("/vendor/lucide/eye.svg"); }
 .i-file { --i: url("/vendor/lucide/file-text.svg"); }
+.i-file-plus { --i: url("/vendor/lucide/file-plus.svg"); }
 .i-history { --i: url("/vendor/lucide/history.svg"); }
 .i-image { --i: url("/vendor/lucide/image.svg"); }
 .i-link { --i: url("/vendor/lucide/link.svg"); }
@@ -113,6 +115,7 @@ body.glow {
 .i-save { --i: url("/vendor/lucide/save.svg"); }
 .i-search { --i: url("/vendor/lucide/search.svg"); }
 .i-share { --i: url("/vendor/lucide/share-2.svg"); }
+.i-sidebar { --i: url("/vendor/lucide/panel-left.svg"); }
 .i-trash { --i: url("/vendor/lucide/trash-2.svg"); }
 .i-upload { --i: url("/vendor/lucide/upload.svg"); }
 .i-users { --i: url("/vendor/lucide/users.svg"); }
@@ -465,6 +468,108 @@ body.glow {
   max-width: 860px;
   margin: 0 auto;
   padding: 28px 36px 80px;
+}
+
+/* ---------- 目录侧边栏（父文档、子文档） ---------- */
+
+.sidebar {
+  flex: none;
+  width: 248px;
+}
+
+.tree,
+.tree ul {
+  list-style: none;
+}
+
+.tree {
+  padding: 6px;
+}
+
+.tree li:not(.open) > ul {
+  display: none;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  padding: 0 2px 0 calc(2px + var(--depth) * 16px);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.tree-row:hover {
+  background: var(--chip);
+}
+
+.tree-row.active {
+  background: var(--coral-soft);
+  color: var(--coral-ink);
+  font-weight: 600;
+}
+
+.tree-toggle {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tree-toggle:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.tree-toggle .icon {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.15s;
+}
+
+.open > .tree-row .tree-toggle .icon {
+  transform: rotate(90deg);
+}
+
+.tree-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 4px;
+  color: inherit;
+  line-height: 32px;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-title.untitled {
+  color: var(--muted);
+}
+
+/* 「在这篇下面新建子文档」：鼠标移到这一行上才出现；手机上没有悬停，一直显示 */
+.tree-add.btn-icon {
+  width: 24px;
+  height: 24px;
+  visibility: hidden;
+}
+
+.tree-row:hover .tree-add,
+.tree-add:focus-visible {
+  visibility: visible;
+}
+
+@media (hover: none) {
+  .tree-add.btn-icon {
+    visibility: visible;
+  }
 }
 
 /* Vditor 编辑器铺满卡片，界面颜色换成站点配色（浅色 / 深色都走这组变量） */
@@ -1134,8 +1239,21 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
     width: 32px;
   }
 
+  /* 目录叠在正文上面 */
   .workspace {
+    flex-direction: column;
+    gap: 8px;
     padding: 8px;
+  }
+
+  .sidebar {
+    width: auto;
+    max-height: 40vh;
+  }
+
+  /* 竖着排时左右的 auto 外边距会让卡片缩到内容那么窄 */
+  .reader {
+    margin: 0;
   }
 
   /* 只读页在手机上跟着页面整体滚动 */

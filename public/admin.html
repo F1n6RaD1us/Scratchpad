@@ -49,7 +49,7 @@
                 <button class="btn btn-outline btn-danger" id="purgeImagesBtn" hidden><i class="icon i-trash"></i><span>删除过期图片</span></button>
             </div>
             <ul class="doc-list admin-list" id="docList"></ul>
-            <p class="hint">删除是永久的：文档、全部历史版本和上传的图片都会删掉，只能用 D1 的「时间旅行」把整个数据库恢复到删除之前。</p>
+            <p class="hint">删除是永久的：文档、全部历史版本和上传的图片都会删掉，它下面的子文档也一起删掉，只能用 D1 的「时间旅行」把整个数据库恢复到删除之前。</p>
         </section>
     </main>
 
@@ -161,7 +161,16 @@
                 return;
             }
 
+            // 父文档 → 子文档，用来显示层级、删除前数出会连带删掉几篇
+            const byId = new Map(docs.map((d) => [d.id, d]));
+            const kids = new Map();
+            for (const d of docs) if (d.parentId) kids.set(d.parentId, [...(kids.get(d.parentId) || []), d]);
+            const countSub = (id) => (kids.get(id) || []).reduce((n, d) => n + 1 + countSub(d.id), 0);
+
             $('docList').replaceChildren(...shown.map((d) => {
+                const parent = byId.get(d.parentId);
+                const sub = countSub(d.id);
+
                 const title = document.createElement('a');
                 title.className = 'title';
                 title.href = `/doc/${d.id}`;
@@ -170,7 +179,15 @@
                 title.classList.toggle('untitled', !d.title);
 
                 const meta = document.createElement('small');
-                meta.textContent = `${d.id} · 更新于 ${new Date(d.updatedAt).toLocaleString()} · ${d.length} 字 · ${d.versions} 个历史版本${d.images ? ` · ${d.images} 张图片` : ''}`;
+                meta.textContent = [
+                    d.id,
+                    parent && `「${parent.title || parent.id}」的子文档`,
+                    sub && `${sub} 篇子文档`,
+                    `更新于 ${new Date(d.updatedAt).toLocaleString()}`,
+                    `${d.length} 字`,
+                    `${d.versions} 个历史版本`,
+                    d.images && `${d.images} 张图片`,
+                ].filter(Boolean).join(' · ');
 
                 const info = document.createElement('div');
                 info.className = 'doc-info';
@@ -181,13 +198,14 @@
 
                 const remove = button('button', 'btn-icon btn-danger', 'i-trash', '', '永久删除');
                 remove.onclick = async () => {
-                    if (!confirm(`永久删除「${d.title || d.id}」？\n文档、全部历史版本和上传的图片都会删掉，拿着链接的人也打不开了。`)) return;
+                    const what = sub ? `「${d.title || d.id}」和它下面的 ${sub} 篇子文档` : `「${d.title || d.id}」`;
+                    if (!confirm(`永久删除${what}？\n文档、全部历史版本和上传的图片都会删掉，拿着链接的人也打不开了。`)) return;
                     remove.disabled = true;
                     const res = await api(`/api/admin/docs/${d.id}`, 'DELETE').catch(() => null);
                     // 404 说明已经不在了，同样从列表里去掉
                     if (res?.ok || res?.status === 404) {
                         docs = docs.filter((x) => x.id !== d.id);
-                        if (d.images) load(); // 它的图片也删了，重新统计图片
+                        if (d.images || sub) load(); // 它的图片、子文档也删了，重新加载列表和图片统计
                         else render();
                     } else {
                         remove.disabled = false;

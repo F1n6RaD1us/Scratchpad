@@ -1,17 +1,20 @@
-// GET  /api/doc/:docId — 读取文档（任何人可调，不返回 editKey）
+// GET  /api/doc/:docId — 读取文档（任何人可调，不返回 editKey）。
+//      带 ?tree=1 时顺带返回它所在的整棵目录树 tree: [{ id, parentId, title }]，省一次请求
 // POST /api/doc/:docId — 保存文档，body: { editKey, content, baseUpdatedAt?, anonId? }
-import { getDoc, saveDoc } from '../../../../lib/store.js';
-import { MAX_CONTENT_BYTES, error, isValidId, json, readJson, safeEqual } from '../../../../lib/util.js';
+import { getDoc, getTree, saveDoc } from '../../../../lib/store.js';
+import { MAX_CONTENT_BYTES, error, isValidId, json, readJson, safeEqual, withTitle } from '../../../../lib/util.js';
 
 const conflict = (doc) => json({ error: '文档已被其他人修改', content: doc.content, updatedAt: doc.updatedAt }, 409);
 
-export async function onRequestGet({ params, env }) {
-  if (!isValidId(params.docId)) return error('无效的文档 ID', 400);
+export async function onRequestGet({ params, env, request }) {
+  const { docId } = params;
+  if (!isValidId(docId)) return error('无效的文档 ID', 400);
 
-  const doc = await getDoc(env, params.docId);
+  const withTree = new URL(request.url).searchParams.has('tree');
+  const [doc, tree] = await Promise.all([getDoc(env, docId), withTree && getTree(env, docId)]);
   if (!doc) return error('文档不存在', 404);
 
-  return json({ content: doc.content, updatedAt: doc.updatedAt });
+  return json({ content: doc.content, updatedAt: doc.updatedAt, ...(tree && { tree: tree.map(withTitle) }) });
 }
 
 export async function onRequestPost({ params, env, request }) {

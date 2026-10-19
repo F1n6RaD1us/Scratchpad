@@ -7,6 +7,7 @@
   const PRESENCE_INTERVAL_MS = 15000;
   const MY_DOCS_KEY = 'shareddoc:mine';
   const LINK_BAR_HIDDEN_KEY = 'shareddoc:linkBarHidden';
+  const SIDEBAR_HIDDEN_KEY = 'shareddoc:sidebarHidden';
   // 编辑模式只留「分屏预览」（默认）和「所见即所得」。去掉的「即时渲染」和所见即所得差别不大，
   // 两者都把行内 HTML（<font color> 之类）拆成单独的标签块，显示不出效果；分屏预览右边的渲染和只读页一样
   const EDIT_MODES = ['sv', 'wysiwyg'];
@@ -83,6 +84,8 @@ flowchart TD
   // /doc/new 是还没保存过的新文档（docId 为 null）：第一次保存时才在服务器上创建，
   // 拿到 docId 后地址栏换成正式的编辑链接（见 onCreated）
   let docId = location.pathname === '/doc/new' ? null : location.pathname.split('/')[2] || '';
+  // 新建子文档（/doc/new?parent=父文档ID&key=编辑密钥）：第一次保存时建在这篇文档下面
+  const parentId = docId === null ? params.get('parent') : null;
 
   // 匿名身份：用于在线人数统计，以及让服务器把同一个人的连续保存合并成一个历史版本
   let anonId = localStorage.getItem('shareddoc:anonId');
@@ -158,6 +161,7 @@ flowchart TD
   function updateTitle(md) {
     const title = docTitle(md);
     document.title = title ? `${title} · 共享文档` : '共享文档';
+    updateTreeTitle(md);
   }
 
   // 请求最多等 20 秒：服务器卡住时给出提示，而不是页面一直停在“加载中”
@@ -336,17 +340,26 @@ flowchart TD
     localStorage.setItem(MY_DOCS_KEY, JSON.stringify(docs));
   }
 
-  // 新文档第一次保存成功：换成正式的编辑链接，记进“我创建的文档”，展开链接栏，开始同步
+  // 新文档第一次保存成功：换成正式的编辑链接，记进“我创建的文档”，展开链接栏，开始同步。
+  // 子文档不记进列表，也不强制展开链接栏：它的编辑链接和整棵树的一样，打开父文档从目录里就能点到
   function onCreated(data) {
     docId = data.docId;
     state.editKey = data.editKey;
     history.replaceState(null, '', `/doc/${docId}?key=${encodeURIComponent(state.editKey)}`);
 
-    const docs = JSON.parse(localStorage.getItem(MY_DOCS_KEY) || '[]');
-    localStorage.setItem(MY_DOCS_KEY, JSON.stringify([{ docId, editKey: state.editKey, createdAt: Date.now() }, ...docs]));
+    if (!parentId) {
+      const docs = JSON.parse(localStorage.getItem(MY_DOCS_KEY) || '[]');
+      localStorage.setItem(MY_DOCS_KEY, JSON.stringify([{ docId, editKey: state.editKey, createdAt: Date.now() }, ...docs]));
+    }
 
-    els.historyBtn.hidden = els.linksBtn.hidden = false;
-    setupLinkBar(true);
+    els.historyBtn.hidden = els.linksBtn.hidden = els.childBtn.hidden = false;
+    setupLinkBar(!parentId);
+    // 目录里占位的「新文档」换成正式的 ID
+    const node = tree.find((n) => n.id === '');
+    if (node) {
+      node.id = docId;
+      renderTree();
+    }
     startSync();
   }
 
@@ -363,7 +376,7 @@ flowchart TD
     state.saving = true;
     setStatus('保存中…');
     const res = await (docId === null
-      ? api('/api/doc', { content, anonId })
+      ? api('/api/doc', { content, anonId, ...(parentId && { parentId, editKey: state.editKey }) })
       : api(`/api/doc/${docId}`, {
         editKey: state.editKey,
         content,
@@ -786,6 +799,139 @@ flowchart TD
     showLinkBar(isNew || localStorage.getItem(LINK_BAR_HIDDEN_KEY) !== 'true');
   }
 
+  // ---------- 目录：父文档、子文档 ----------
+
+  // 一棵树里的文档共用同一个编辑密钥（子文档沿用父文档的），所以编辑模式下目录里的链接都带上密钥，点过去照样能编辑
+  const narrow = matchMedia('(max-width: 720px)');
+  let tree = [];              // [{ id, parentId, title }]，新建中的子文档还没有 ID，用 '' 占位
+  const treeOpen = new Set(); // 展开着的节点
+  let treeShown = false;      // 目录第一次出现时决定侧边栏要不要展开，之后由用户自己开关
+
+  const keyParam = () => (state.canEdit ? `?key=${encodeURIComponent(state.editKey)}` : '');
+  const newChildUrl = (id) => `/doc/new?parent=${id}&key=${encodeURIComponent(state.editKey)}`;
+
+  // 和 lib/util.js 的 titleOf 一样：第一个标题，没有标题就用第一行文字
+  function treeTitle(md) {
+    const line = docTitle(md) || md.split('\n').find((l) => l.trim()) || '';
+    return line.replace(/^[\s>*+-]+/, '').trim().slice(0, 80);
+  }
+
+  function showSidebar(visible) {
+    els.sidebar.hidden = !visible;
+    els.treeBtn.classList.toggle('active', visible);
+  }
+
+  els.treeBtn.onclick = () => {
+    showSidebar(els.sidebar.hidden);
+    // 窄屏上目录叠在正文上面，每次打开页面都先收起，开关不记
+    if (!narrow.matches) localStorage.setItem(SIDEBAR_HIDDEN_KEY, String(els.sidebar.hidden));
+  };
+
+  // 只有一篇文档（没有父文档也没有子文档）时不显示目录
+  function setTree(nodes) {
+    tree = nodes;
+    if (!treeShown) {
+      if (tree.length < 2) return;
+      treeShown = true;
+      els.treeBtn.hidden = false;
+      showSidebar(!narrow.matches && localStorage.getItem(SIDEBAR_HIDDEN_KEY) !== 'true');
+      // 展开当前文档和它的各级上级
+      const byId = new Map(tree.map((n) => [n.id, n]));
+      for (let n = byId.get(docId ?? ''); n && !treeOpen.has(n.id); n = byId.get(n.parentId)) treeOpen.add(n.id);
+    }
+    renderTree();
+  }
+
+  function renderTree() {
+    const current = docId ?? '';
+    const ids = new Set(tree.map((n) => n.id));
+    const kids = new Map(); // 父文档 ID → 子文档（已按创建时间排好）；根归在 null 下
+    for (const n of tree) {
+      const parent = ids.has(n.parentId) ? n.parentId : null;
+      if (!kids.has(parent)) kids.set(parent, []);
+      kids.get(parent).push(n);
+    }
+
+    const build = (parent, depth) => (kids.get(parent) || []).map((n) => {
+      const li = document.createElement('li');
+      const sub = kids.get(n.id);
+
+      // 没有子文档的也占一个同样宽的位置，标题才能对齐
+      const toggle = document.createElement(sub ? 'button' : 'span');
+      toggle.className = 'tree-toggle';
+      if (sub) {
+        toggle.innerHTML = '<i class="icon i-chevron"></i>';
+        toggle.title = '展开 / 收起';
+        toggle.onclick = () => {
+          if (li.classList.toggle('open')) treeOpen.add(n.id);
+          else treeOpen.delete(n.id);
+        };
+      }
+
+      const link = document.createElement('a');
+      link.className = 'tree-title';
+      link.textContent = n.title || '无标题';
+      link.classList.toggle('untitled', !n.title);
+      if (n.id) link.href = `/doc/${n.id}${keyParam()}`;
+      if (n.id === current) link.setAttribute('aria-current', 'page');
+
+      const row = document.createElement('div');
+      row.className = 'tree-row';
+      row.classList.toggle('active', n.id === current);
+      row.style.setProperty('--depth', depth);
+      row.append(toggle, link);
+
+      // 编辑模式下每一行都能直接在它下面新建子文档
+      if (state.canEdit && n.id) {
+        const add = document.createElement('a');
+        add.className = 'btn btn-icon tree-add';
+        add.href = newChildUrl(n.id);
+        add.title = '在这篇下面新建子文档';
+        add.innerHTML = '<i class="icon i-plus"></i>';
+        row.append(add);
+      }
+
+      li.append(row);
+      if (sub) {
+        const ul = document.createElement('ul');
+        ul.append(...build(n.id, depth + 1));
+        li.append(ul);
+        li.classList.toggle('open', treeOpen.has(n.id));
+      }
+      return li;
+    });
+
+    els.tree.replaceChildren(...build(null, 0));
+  }
+
+  // 编辑时目录里当前这篇的标题跟着变
+  function updateTreeTitle(md) {
+    const node = tree.find((n) => n.id === (docId ?? ''));
+    const link = els.tree.querySelector('.tree-row.active .tree-title');
+    if (!node || !link) return;
+    node.title = treeTitle(md);
+    link.textContent = node.title || '无标题';
+    link.classList.toggle('untitled', !node.title);
+  }
+
+  // 有没保存的修改时先存好再跳过去，免得浏览器问「确定要离开吗」
+  async function go(url) {
+    if (isDirty()) await save();
+    location.href = url;
+  }
+
+  els.tree.addEventListener('click', (e) => {
+    const a = e.target.closest('a[href]');
+    if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return; // 按着 Ctrl 等键是要在新标签页打开，照常处理
+    e.preventDefault();
+    if (a.matches('[aria-current]')) {
+      if (narrow.matches) showSidebar(false); // 点的就是当前这篇：窄屏上收起目录，好看正文
+      return;
+    }
+    go(a.href);
+  });
+  els.childBtn.onclick = () => go(newChildUrl(docId));
+
   // ---------- 历史版本 ----------
 
   let selectedVersion = null;
@@ -850,8 +996,10 @@ flowchart TD
 
   async function refresh() {
     if (document.hidden || state.saving || isDirty()) return; // 有未保存的修改时交给保存时的冲突处理
-    const { ok, data } = await api(`/api/doc/${docId}`);
-    if (!ok || data.updatedAt === state.updatedAt || isDirty()) return;
+    const { ok, data } = await api(`/api/doc/${docId}?tree=1`);
+    if (!ok) return;
+    setTree(data.tree); // 顺带更新目录：别人可能新建了子文档、改了标题
+    if (data.updatedAt === state.updatedAt || isDirty()) return;
     applyRemote(data.content, data.updatedAt);
   }
 
@@ -869,10 +1017,22 @@ flowchart TD
 
   async function init() {
     if (docId === null) {
-      // 新文档：还没有链接和历史，这两个按钮等第一次保存后再出现
-      els.historyBtn.hidden = els.linksBtn.hidden = true;
+      // 新文档：还没有链接和历史，也不能在它下面建子文档，这几个按钮等第一次保存后再出现
+      els.historyBtn.hidden = els.linksBtn.hidden = els.childBtn.hidden = true;
+      // 新建子文档：先取父文档所在的树，目录里放一个占位的「新文档」，看得出会建在哪里
+      let nodes = [];
+      if (parentId) {
+        const { ok, status, data } = await api(`/api/doc/${encodeURIComponent(parentId)}?tree=1`);
+        if (!ok) {
+          if (status === 404) els.preview.innerHTML = '<p>父文档不存在，没法在它下面新建子文档。<a href="/">回文档首页</a></p>';
+          else note(els.preview, `加载失败：${data.error || status}`);
+          return;
+        }
+        nodes = [...data.tree, { id: '', parentId, title: treeTitle(WELCOME) }];
+      }
       updateTitle(WELCOME);
       await enterEditMode(WELCOME);
+      setTree(nodes);
       setStatus('尚未保存');
       return;
     }
@@ -881,7 +1041,7 @@ flowchart TD
       return;
     }
 
-    const { ok, status, data } = await api(`/api/doc/${docId}`);
+    const { ok, status, data } = await api(`/api/doc/${docId}?tree=1`);
     if (!ok) {
       if (status === 404) els.preview.innerHTML = '<p>文档不存在。<a href="/">新建一个？</a></p>';
       else note(els.preview, `加载失败：${data.error || status}`);
@@ -907,6 +1067,7 @@ flowchart TD
       applyRemote(content, updatedAt);
       els.shareBtn.hidden = false; // 编辑模式下链接栏里已经有复制按钮
     }
+    setTree(data.tree); // 要等确定了能不能编辑：编辑模式下目录里的链接才带密钥
 
     startSync();
   }
