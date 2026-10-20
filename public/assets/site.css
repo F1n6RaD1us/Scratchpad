@@ -96,13 +96,13 @@ body.glow {
 }
 
 .i-arrow-left { --i: url("/vendor/lucide/arrow-left.svg"); }
-.i-chevron { --i: url("/vendor/lucide/chevron-right.svg"); }
 .i-columns { --i: url("/vendor/lucide/columns-2.svg"); }
 .i-copy { --i: url("/vendor/lucide/copy.svg"); }
 .i-download { --i: url("/vendor/lucide/download.svg"); }
 .i-eye { --i: url("/vendor/lucide/eye.svg"); }
 .i-file { --i: url("/vendor/lucide/file-text.svg"); }
-.i-file-plus { --i: url("/vendor/lucide/file-plus.svg"); }
+.i-folder { --i: url("/vendor/lucide/folder.svg"); }
+.i-folder-plus { --i: url("/vendor/lucide/folder-plus.svg"); }
 .i-history { --i: url("/vendor/lucide/history.svg"); }
 .i-image { --i: url("/vendor/lucide/image.svg"); }
 .i-link { --i: url("/vendor/lucide/link.svg"); }
@@ -470,37 +470,49 @@ body.glow {
   padding: 28px 36px 80px;
 }
 
-/* ---------- 目录侧边栏（父文档、子文档） ---------- */
+/* ---------- 目录侧边栏（文档集里的文档） ---------- */
 
 .sidebar {
   flex: none;
   width: 248px;
 }
 
-.tree,
-.tree ul {
-  list-style: none;
-}
-
-.tree {
+.sidebar .pane-body {
   padding: 6px;
 }
 
-.tree li:not(.open) > ul {
-  display: none;
+.tree {
+  list-style: none;
 }
 
 .tree-row {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
   height: 32px;
-  padding: 0 2px 0 calc(2px + var(--depth) * 16px);
+  padding: 0 8px;
   border-radius: 8px;
+  color: var(--ink);
   font-size: 13px;
+  text-decoration: none;
 }
 
-.tree-row:hover {
+.tree-row .icon {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+/* 集里的文档往里缩一格，看得出是文档集下面的 */
+.tree .tree-row {
+  padding-left: 24px;
+}
+
+.tree-set .tree-row {
+  font-weight: 600;
+}
+
+.tree-row[href]:hover {
   background: var(--chip);
 }
 
@@ -510,42 +522,14 @@ body.glow {
   font-weight: 600;
 }
 
-.tree-toggle {
-  display: grid;
-  flex-shrink: 0;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.tree-toggle:hover {
-  background: var(--line);
-  color: var(--ink);
-}
-
-.tree-toggle .icon {
-  width: 14px;
-  height: 14px;
-  transition: transform 0.15s;
-}
-
-.open > .tree-row .tree-toggle .icon {
-  transform: rotate(90deg);
+.tree-row.active .icon {
+  color: inherit;
 }
 
 .tree-title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  padding: 0 4px;
-  color: inherit;
-  line-height: 32px;
-  text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -554,22 +538,91 @@ body.glow {
   color: var(--muted);
 }
 
-/* 「在这篇下面新建子文档」：鼠标移到这一行上才出现；手机上没有悬停，一直显示 */
-.tree-add.btn-icon {
-  width: 24px;
-  height: 24px;
-  visibility: hidden;
+.tree-new {
+  justify-content: flex-start;
+  width: 100%;
+  margin-top: 4px;
+  padding-left: 24px;
+  color: var(--muted);
 }
 
-.tree-row:hover .tree-add,
-.tree-add:focus-visible {
-  visibility: visible;
+/* ---------- 文档集的目录页 ---------- */
+
+.set-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 36px 80px;
 }
 
-@media (hover: none) {
-  .tree-add.btn-icon {
-    visibility: visible;
-  }
+.set-title,
+.set-title-input {
+  font: 700 26px/1.3 var(--font);
+}
+
+.set-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 编辑模式下名称直接在标题的位置上改，看起来还是标题，鼠标移上去、点进去才显出输入框 */
+.set-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  margin-left: -9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+}
+
+.set-title-input:hover {
+  border-color: var(--line);
+}
+
+.set-title-input:focus {
+  outline: none;
+  border-color: var(--coral);
+  background: var(--bg);
+}
+
+.set-title-input::placeholder {
+  color: var(--muted);
+}
+
+.set-hint {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.set-docs-head {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.set-docs-head .spacer {
+  flex: 1;
+}
+
+#setDocs .title {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+#setDocs .title:hover {
+  color: var(--coral-ink);
+}
+
+#setDocs .title.untitled {
+  color: var(--muted);
 }
 
 /* Vditor 编辑器铺满卡片，界面颜色换成站点配色（浅色 / 深色都走这组变量） */
@@ -947,6 +1000,12 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
   line-height: 1.8;
 }
 
+.landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .features {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1006,6 +1065,13 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 文档集名称前的文件夹图标 */
+.doc-list .title .icon {
+  margin-right: 6px;
+  color: var(--muted);
+  vertical-align: -3px;
 }
 
 .doc-list small {
@@ -1261,7 +1327,8 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
     height: auto;
   }
 
-  .doc-body {
+  .doc-body,
+  .set-page {
     padding: 20px;
   }
 

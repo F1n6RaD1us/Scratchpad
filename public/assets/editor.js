@@ -24,6 +24,8 @@
 - 可以从网页或 Word 里复制内容粘贴进来，格式会尽量保留
 - 想像写 Word 一样直接在排版效果上编辑，可以在工具栏的「切换编辑模式」里选「所见即所得」
 `;
+  // 文档集里新建的文档只放一个标题（用法说明看第一篇就够了），原样不动同样不会保存
+  const NEW_DOC_IN_SET = '# 新文档\n';
 
   // Vditor 运行时按需加载的文件（解析引擎、语言包、主题等）和主文件在同一个自托管目录下
   const VDITOR_CDN = document.querySelector('script[src*="/vendor/vditor-"]').src.replace(/\/dist\/.*$/, '');
@@ -80,12 +82,15 @@ flowchart TD
   // 页面上所有带 id 的元素，按 id 取用
   const els = Object.fromEntries([...document.querySelectorAll('[id]')].map((el) => [el.id, el]));
 
-  const params = new URLSearchParams(location.search);
-  // /doc/new 是还没保存过的新文档（docId 为 null）：第一次保存时才在服务器上创建，
-  // 拿到 docId 后地址栏换成正式的编辑链接（见 onCreated）
-  let docId = location.pathname === '/doc/new' ? null : location.pathname.split('/')[2] || '';
-  // 新建子文档（/doc/new?parent=父文档ID&key=编辑密钥）：第一次保存时建在这篇文档下面
-  const parentId = docId === null ? params.get('parent') : null;
+  // 当前显示的内容。在文档集里切换文档不重新加载页面（见下文「切换页面」），这几个值随之改变
+  let page = 'doc';      // 'doc' 文档，'set' 文档集的目录页
+  // 当前文档。null 是还没保存过的新文档（/doc/new）：第一次保存时才在服务器上创建，
+  // 拿到 ID 后地址栏换成正式的编辑链接（见 onCreated）
+  let docId = null;
+  let newDocSet = null;  // 新文档要建在哪个文档集里（/doc/new?set=文档集ID&key=编辑密钥），不在集里是 null
+  // 当前所在的文档集 { id, title, docs: [{ id, title, updatedAt }] }，不在集里是 null；
+  // 还没建好的新文档集（/set/new）id 是 null
+  let docSet = null;
 
   // 匿名身份：用于在线人数统计，以及让服务器把同一个人的连续保存合并成一个历史版本
   let anonId = localStorage.getItem('shareddoc:anonId');
@@ -95,11 +100,12 @@ flowchart TD
   }
 
   const state = {
-    editKey: params.get('key'),
+    // 文档集里的文档和文档集共用编辑密钥，所以在集里切换时密钥不变，能不能编辑也不变，只在打开页面时校验一次
+    editKey: new URLSearchParams(location.search).get('key'),
     canEdit: false,
-    updatedAt: null,  // 服务器上当前版本的时间戳，保存时用作乐观锁
-    savedContent: '', // 最后一次和服务器一致的内容
-    saving: false,
+    editorReady: false, // 编辑器创建好了（编辑模式下第一次打开文档时才创建）
+    updatedAt: null,    // 服务器上当前版本的时间戳，保存时用作乐观锁
+    savedContent: '',   // 最后一次和服务器一致的内容
     autosaveTimer: null,
   };
 
@@ -127,10 +133,12 @@ flowchart TD
   }
 
   const renderInto = (el, md) => Vditor.preview(el, md, previewOptions());
-  const currentContent = () => (state.canEdit ? vditor.getValue() : state.savedContent);
+  // 正在编辑器里改文档（不是只读，也不在文档集的目录页上）
+  const editing = () => state.editorReady && page === 'doc';
+  const currentContent = () => (editing() ? vditor.getValue() : state.savedContent);
   // 新文档被清空了不算改动：空白内容不值得建一篇文档
   function isDirty() {
-    if (!state.canEdit) return false;
+    if (!editing()) return false;
     const content = vditor.getValue();
     return content !== state.savedContent && (docId !== null || content.trim() !== '');
   }
@@ -158,10 +166,13 @@ flowchart TD
     return m ? m[1].slice(0, 80) : '';
   }
 
-  function updateTitle(md) {
-    const title = docTitle(md);
+  function setPageTitle(title) {
     document.title = title ? `${title} · 共享文档` : '共享文档';
-    updateTreeTitle(md);
+  }
+
+  function updateTitle(md) {
+    setPageTitle(docTitle(md));
+    updateSidebarTitle(md);
   }
 
   // 请求最多等 20 秒：服务器卡住时给出提示，而不是页面一直停在“加载中”
@@ -249,12 +260,11 @@ flowchart TD
     els.updatedLabel.textContent = `更新于 ${new Date(ts).toLocaleString()}`;
   }
 
-  // 用服务器内容替换本地（首次加载、别人改了、冲突时选择放弃本地）
-  function applyRemote(content, updatedAt) {
+  // 显示服务器上的内容（打开文档、在文档集里切换、别人保存了新内容）
+  async function showContent(content, updatedAt) {
     setUpdatedAt(updatedAt);
     if (state.canEdit) {
-      vditor.setValue(content, true);
-      state.savedContent = vditor.getValue(); // Vditor 会规范化格式，以它的结果为基准判断有没有改动
+      await ensureEditor(content);
     } else {
       state.savedContent = content;
       renderInto(els.preview, content);
@@ -262,17 +272,23 @@ flowchart TD
     updateTitle(content);
   }
 
-  // 创建编辑器；Vditor 要先加载解析引擎，加载完才算进入编辑模式
-  function enterEditMode(content) {
-    els.workspace.classList.remove('reading');
-    els.readerPane.hidden = true;
-    els.editorPane.hidden = false;
-    els.editTools.hidden = els.saveBtn.hidden = false;
-    els.modeBadge.classList.add('editing');
-    els.modeIcon.className = 'icon i-pencil';
-    els.modeLabel.textContent = '可编辑';
-    setStatus('加载编辑器…');
+  // 编辑器只创建一次，之后切换文档时换掉里面的内容，同时清掉撤销记录，免得撤销回上一篇的内容。
+  // Vditor 要先加载解析引擎才能用，所以存下创建它的 Promise，连着切换时等它加载完
+  let editorLoaded = null;
 
+  async function ensureEditor(content) {
+    if (editorLoaded) {
+      await editorLoaded;
+      vditor.setValue(content, true);
+    } else {
+      editorLoaded = createEditor(content);
+      await editorLoaded;
+    }
+    state.savedContent = vditor.getValue(); // Vditor 会规范化格式，以它的结果为基准判断有没有改动
+  }
+
+  function createEditor(content) {
+    setStatus('加载编辑器…');
     const t = themes();
     return new Promise((resolve) => {
       vditor = new Vditor('vditor', {
@@ -310,13 +326,57 @@ flowchart TD
           // 字数的提示气泡同样改成往下弹（提示文字见 site.css）
           els.editorPane.querySelector('.vditor-counter').classList.replace('vditor-tooltipped__nw', 'vditor-tooltipped__sw');
 
-          state.canEdit = true;
-          state.savedContent = vditor.getValue();
-          setStatus('已保存');
+          state.editorReady = true;
           resolve();
         },
       });
     });
+  }
+
+  // 有没有编辑权限：打开页面时校验一次密钥，之后不变
+  function setEditable(editable) {
+    state.canEdit = editable;
+    els.editTools.hidden = !editable;
+    els.shareBtn.hidden = editable; // 编辑模式下链接栏里已经有复制按钮
+    els.modeBadge.classList.toggle('editing', editable);
+    els.modeIcon.className = `icon ${editable ? 'i-pencil' : 'i-eye'}`;
+    els.modeLabel.textContent = editable ? '可编辑' : '只读';
+  }
+
+  // 切换显示文档（'doc'）、文档集的目录页（'set'），或者只显示一行提示（'none'，比如文档不存在），
+  // 顶栏只留当前页面用得上的按钮
+  function showPage(next) {
+    page = next;
+    const onDoc = page === 'doc';
+    const inEditor = onDoc && state.canEdit;
+    els.setPane.hidden = page !== 'set';
+    els.editorPane.hidden = !inEditor;
+    els.readerPane.hidden = page === 'set' || inEditor;
+    els.workspace.classList.toggle('reading', !inEditor);
+    els.importBtn.hidden = els.saveBtn.hidden = !inEditor;
+    els.downloadBtn.hidden = !onDoc;
+    updateSavedButtons();
+  }
+
+  // 链接、历史、在线人数要等文档（文档集）在服务器上建好了才有
+  function updateSavedButtons() {
+    const docSaved = page === 'doc' && docId !== null;
+    els.linksBtn.hidden = !(docSaved || (page === 'set' && docSet?.id));
+    els.historyBtn.hidden = els.online.hidden = !docSaved;
+  }
+
+  // 只显示一行提示（比如文档不存在），后面跟一个回文档首页的链接
+  function showMessage(text) {
+    docId = null;
+    showPage('none');
+    els.updatedLabel.textContent = '';
+    const home = document.createElement('a');
+    home.href = '/';
+    home.textContent = '回文档首页';
+    const p = document.createElement('p');
+    p.append(`${text} `, home);
+    els.preview.replaceChildren(p);
+    setStatus('');
   }
 
   // 记住用户选的编辑模式（分屏预览 / 所见即所得），下次打开沿用
@@ -331,81 +391,100 @@ flowchart TD
     }
   });
 
-  // 更新“我创建的文档”列表里的标题，方便在文档首页辨认
-  function rememberTitle(content) {
-    const docs = JSON.parse(localStorage.getItem(MY_DOCS_KEY) || '[]');
-    const mine = docs.find((d) => d.docId === docId);
-    if (!mine) return;
-    mine.title = docTitle(content);
-    localStorage.setItem(MY_DOCS_KEY, JSON.stringify(docs));
+  // 「我创建的文档」列表（文档首页显示，只存在这台设备上）：文档记 docId，文档集记 setId
+  const loadMine = () => JSON.parse(localStorage.getItem(MY_DOCS_KEY) || '[]');
+
+  function rememberMine(item) {
+    localStorage.setItem(MY_DOCS_KEY, JSON.stringify([{ ...item, editKey: state.editKey, createdAt: Date.now() }, ...loadMine()]));
   }
 
-  // 新文档第一次保存成功：换成正式的编辑链接，记进“我创建的文档”，展开链接栏，开始同步。
-  // 子文档不记进列表，也不强制展开链接栏：它的编辑链接和整棵树的一样，打开父文档从目录里就能点到
+  // 更新列表里的标题，方便在文档首页辨认
+  function rememberTitle(id, title) {
+    const items = loadMine();
+    const mine = items.find((d) => d.docId === id || d.setId === id);
+    if (!mine) return;
+    mine.title = title;
+    localStorage.setItem(MY_DOCS_KEY, JSON.stringify(items));
+  }
+
+  // 新文档第一次保存成功：换成正式的编辑链接，开始同步。
+  // 单独的文档记进「我创建的文档」，展开链接栏提示保存编辑链接；文档集里的文档不单独记，也不强制展开链接栏：
+  // 它的编辑链接和文档集的一样，打开文档集就能在目录里找到
   function onCreated(data) {
     docId = data.docId;
     state.editKey = data.editKey;
-    history.replaceState(null, '', `/doc/${docId}?key=${encodeURIComponent(state.editKey)}`);
+    // 保存时可能已经点了浏览器的后退（见「切换页面」），地址栏不再是这篇新文档，就不能替换了
+    if (location.pathname === '/doc/new') history.replaceState(null, '', docUrl(docId));
+    currentUrl = location.href;
 
-    if (!parentId) {
-      const docs = JSON.parse(localStorage.getItem(MY_DOCS_KEY) || '[]');
-      localStorage.setItem(MY_DOCS_KEY, JSON.stringify([{ docId, editKey: state.editKey, createdAt: Date.now() }, ...docs]));
+    const inSet = newDocSet !== null;
+    newDocSet = null;
+    if (inSet) {
+      docSet.docs.push({ id: docId, title: listTitle(vditor.getValue()), updatedAt: data.updatedAt });
+      renderSidebar();
+    } else {
+      rememberMine({ docId });
     }
-
-    els.historyBtn.hidden = els.linksBtn.hidden = els.childBtn.hidden = false;
-    setupLinkBar(!parentId);
-    // 目录里占位的「新文档」换成正式的 ID
-    const node = tree.find((n) => n.id === '');
-    if (node) {
-      node.id = docId;
-      renderTree();
-    }
-    startSync();
+    updateSavedButtons();
+    setupLinkBar(!inSet);
+    heartbeat({ force: true });
   }
 
   // ---------- 保存 ----------
 
-  // create：新文档没改过也立即创建（上传图片要先有文档）
-  async function save({ create = false } = {}) {
+  // 正在进行的保存。保存中又调用时返回同一个 Promise，等这次保存（连同冲突合并后的再次保存）全部完成：
+  // 切换文档前要靠它确认已经存好了
+  let saving = null;
+
+  function save(options) {
     clearTimeout(state.autosaveTimer);
-    if (!state.canEdit || state.saving) return; // 保存中又有输入的话，保存完会再排一次自动保存
+    saving ??= saveNow(options).finally(() => { saving = null; });
+    return saving;
+  }
 
-    const content = vditor.getValue();
-    if (!isDirty() && !(create && docId === null)) return setStatus(docId === null ? '尚未保存' : '已保存');
+  // create：新文档没改过也立即创建（上传图片要先有文档）
+  async function saveNow({ create = false } = {}) {
+    for (;;) {
+      if (!editing()) return;
+      const content = vditor.getValue();
+      if (!isDirty() && !(create && docId === null)) return setStatus(docId === null ? '尚未保存' : '已保存');
 
-    state.saving = true;
-    setStatus('保存中…');
-    const res = await (docId === null
-      ? api('/api/doc', { content, anonId, ...(parentId && { parentId, editKey: state.editKey }) })
-      : api(`/api/doc/${docId}`, {
-        editKey: state.editKey,
-        content,
-        baseUpdatedAt: state.updatedAt,
-        anonId,
-      })
-    ).catch(() => null);
-    state.saving = false;
+      setStatus('保存中…');
+      const res = await (docId === null
+        ? api('/api/doc', { content, anonId, ...(newDocSet && { setId: newDocSet, editKey: state.editKey }) })
+        : api(`/api/doc/${docId}`, {
+          editKey: state.editKey,
+          content,
+          baseUpdatedAt: state.updatedAt,
+          anonId,
+        })
+      ).catch(() => null);
 
-    if (!res) return setStatus('保存失败：网络错误', true);
-    if (res.status === 409) return resolveConflict(res.data);
-    if (res.status === 403) {
-      setStatus('无权编辑', true);
-      return showError('编辑密钥无效，无法保存。请确认你打开的是完整的编辑链接。');
+      if (!res) return setStatus('保存失败：网络错误', true);
+      if (res.status === 409) {
+        mergeRemote(res.data);
+        continue; // 合并完立即再存一次
+      }
+      if (res.status === 403) {
+        setStatus('无权编辑', true);
+        return showError('编辑密钥无效，无法保存。请确认你打开的是完整的编辑链接。');
+      }
+      if (!res.ok) return setStatus(`保存失败：${res.data.error || res.status}`, true);
+
+      if (docId === null) onCreated(res.data);
+      state.savedContent = content;
+      setUpdatedAt(res.data.updatedAt);
+      rememberTitle(docId, docTitle(content));
+      if (isDirty()) scheduleAutosave(); // 保存期间又有输入，再排一次
+      else setStatus('已保存');
+      return;
     }
-    if (!res.ok) return setStatus(`保存失败：${res.data.error || res.status}`, true);
-
-    if (docId === null) onCreated(res.data);
-    state.savedContent = content;
-    setUpdatedAt(res.data.updatedAt);
-    rememberTitle(content);
-    if (isDirty()) scheduleAutosave();
-    else setStatus('已保存');
   }
 
   // 保存时发现别人在我编辑期间存了新版本：像 git 合并分支一样三方合并（见 merge.js），
   // 底版是我开始改时的服务器版本。两人改的是不同段落就自动合并；改了同一段的，
   // 两种写法都留在文档里，用 <<<<<<< ======= >>>>>>> 标出来，由人来挑。合并完立即保存，谁的修改都不会丢
-  function resolveConflict(remote) {
+  function mergeRemote(remote) {
     const { text, conflicts } = mergeText(state.savedContent, vditor.getValue(), remote.content);
     state.savedContent = remote.content;
     setUpdatedAt(remote.updatedAt);
@@ -414,7 +493,6 @@ flowchart TD
     vditor.tip(conflicts
       ? `别人刚保存了新版本，有 ${conflicts} 处和你改了同一段。两种写法都保留在文档里，用 <<<<<<< 和 >>>>>>> 标出，请留下需要的内容，再删掉标记`
       : '别人刚保存了新版本，已和你的修改自动合并', conflicts ? 15000 : 4000);
-    save();
   }
 
   // 换掉编辑器全文时尽量让光标、滚动位置留在原处：记下光标前的一小段文字，
@@ -750,7 +828,7 @@ flowchart TD
   // Ctrl+P / 另存为 PDF 时只打印文档正文（打印样式见 site.css 的 @media print）。
   // 公式、流程图要异步渲染，beforeprint 里来不及重新渲染，所以复制页面上已经渲染好的
   addEventListener('beforeprint', () => {
-    if (state.canEdit) {
+    if (editing()) {
       // 编辑器导出的 HTML 里公式、流程图还是源码，按出现顺序换成编辑区里渲染好的（:not(code) 排除编辑区里的源码）
       els.printArea.innerHTML = vditor.getHTML();
       const RENDERED = ':is(.language-math, .language-mermaid):not(code)';
@@ -769,7 +847,7 @@ flowchart TD
     }
   });
 
-  // ---------- 链接栏：编辑模式下列出只读链接和编辑链接，收起状态会记住 ----------
+  // ---------- 链接栏：编辑模式下列出当前文档（文档集）的只读链接和编辑链接，收起状态会记住 ----------
 
   function showLinkBar(visible) {
     els.linkBar.hidden = !visible;
@@ -785,33 +863,41 @@ flowchart TD
   };
   els.copyViewLink.onclick = () => copyText(els.viewLinkInput.value, els.copyViewLink);
   // 只读页的「复制链接」：只复制只读链接，不带地址栏里可能有的（无效的）编辑密钥
-  els.shareBtn.onclick = () => copyText(`${location.origin}/doc/${docId}`, els.shareBtn);
+  els.shareBtn.onclick = () => copyText(`${location.origin}${location.pathname}`, els.shareBtn);
   els.copyEditLink.onclick = () => copyText(els.editLinkInput.value, els.copyEditLink);
   for (const input of [els.viewLinkInput, els.editLinkInput]) input.onfocus = () => input.select();
 
-  // isNew：刚创建的文档，强制展开链接栏并提示保存编辑链接
+  // 切换页面时换成当前页面的链接。还没保存的新文档、新文档集没有链接，先收起（不改记住的收起状态）。
+  // isNew：刚创建的，强制展开并提示保存编辑链接
   function setupLinkBar(isNew = false) {
-    const viewUrl = `${location.origin}/doc/${docId}`;
+    const id = page === 'doc' ? docId : page === 'set' ? docSet?.id : null;
+    if (!state.canEdit || !id) {
+      els.linkBar.hidden = true;
+      return;
+    }
+    const viewUrl = `${location.origin}/${page}/${id}`;
     els.viewLinkInput.value = viewUrl;
     els.editLinkInput.value = `${viewUrl}?key=${encodeURIComponent(state.editKey)}`;
+    els.linkHintWhat.textContent = page === 'doc' ? '文档' : '文档集';
     els.linkHint.hidden = !isNew;
     els.linkBar.classList.toggle('new', isNew);
     showLinkBar(isNew || localStorage.getItem(LINK_BAR_HIDDEN_KEY) !== 'true');
   }
 
-  // ---------- 目录：父文档、子文档 ----------
+  // ---------- 目录：文档集里的文档 ----------
 
-  // 一棵树里的文档共用同一个编辑密钥（子文档沿用父文档的），所以编辑模式下目录里的链接都带上密钥，点过去照样能编辑
+  // 在文档集里时左边显示目录：最上面是文档集本身（点了回到目录页），下面是集里的文档，点了在当前页面切换过去。
+  // 集里的文档和文档集共用编辑密钥，所以编辑模式下这些链接都带上密钥，切过去照样能编辑
   const narrow = matchMedia('(max-width: 720px)');
-  let tree = [];              // [{ id, parentId, title }]，新建中的子文档还没有 ID，用 '' 占位
-  const treeOpen = new Set(); // 展开着的节点
-  let treeShown = false;      // 目录第一次出现时决定侧边栏要不要展开，之后由用户自己开关
+  let sidebarShown = false; // 目录第一次出现时决定侧边栏要不要展开，之后由用户自己开关
 
   const keyParam = () => (state.canEdit ? `?key=${encodeURIComponent(state.editKey)}` : '');
-  const newChildUrl = (id) => `/doc/new?parent=${id}&key=${encodeURIComponent(state.editKey)}`;
+  const docUrl = (id) => `/doc/${id}${keyParam()}`;
+  const setUrl = (id) => `/set/${id}${keyParam()}`;
+  const newDocUrl = (setId) => `/doc/new?set=${setId}&key=${encodeURIComponent(state.editKey)}`;
 
   // 和 lib/util.js 的 titleOf 一样：第一个标题，没有标题就用第一行文字
-  function treeTitle(md) {
+  function listTitle(md) {
     const line = docTitle(md) || md.split('\n').find((l) => l.trim()) || '';
     return line.replace(/^[\s>*+-]+/, '').trim().slice(0, 80);
   }
@@ -827,110 +913,267 @@ flowchart TD
     if (!narrow.matches) localStorage.setItem(SIDEBAR_HIDDEN_KEY, String(els.sidebar.hidden));
   };
 
-  // 只有一篇文档（没有父文档也没有子文档）时不显示目录
-  function setTree(nodes) {
-    tree = nodes;
-    if (!treeShown) {
-      if (tree.length < 2) return;
-      treeShown = true;
-      els.treeBtn.hidden = false;
-      showSidebar(!narrow.matches && localStorage.getItem(SIDEBAR_HIDDEN_KEY) !== 'true');
-      // 展开当前文档和它的各级上级
-      const byId = new Map(tree.map((n) => [n.id, n]));
-      for (let n = byId.get(docId ?? ''); n && !treeOpen.has(n.id); n = byId.get(n.parentId)) treeOpen.add(n.id);
+  // 目录里的一行。href 为空的是正在新建、还没保存的文档
+  function navRow(href, icon, title, current) {
+    const a = document.createElement('a');
+    a.className = 'tree-row';
+    a.dataset.nav = '';
+    a.innerHTML = `<i class="icon ${icon}"></i>`;
+    if (href) a.href = href;
+    if (current) {
+      a.classList.add('active');
+      a.setAttribute('aria-current', 'page');
     }
-    renderTree();
+    const label = document.createElement('span');
+    label.className = 'tree-title';
+    label.textContent = title || '无标题';
+    label.classList.toggle('untitled', !title);
+    a.append(label);
+    return a;
   }
 
-  function renderTree() {
-    const current = docId ?? '';
-    const ids = new Set(tree.map((n) => n.id));
-    const kids = new Map(); // 父文档 ID → 子文档（已按创建时间排好）；根归在 null 下
-    for (const n of tree) {
-      const parent = ids.has(n.parentId) ? n.parentId : null;
-      if (!kids.has(parent)) kids.set(parent, []);
-      kids.get(parent).push(n);
+  // 不在文档集里（单独的文档、还没建好的新文档集）时不显示目录
+  function renderSidebar() {
+    const inSet = Boolean(docSet?.id);
+    els.treeBtn.hidden = !inSet;
+    if (!inSet) return showSidebar(false);
+    if (!sidebarShown) {
+      sidebarShown = true;
+      showSidebar(!narrow.matches && localStorage.getItem(SIDEBAR_HIDDEN_KEY) !== 'true');
     }
 
-    const build = (parent, depth) => (kids.get(parent) || []).map((n) => {
+    els.sidebarSet.replaceChildren(navRow(setUrl(docSet.id), 'i-folder', docSet.title, page === 'set'));
+    const rows = docSet.docs.map((d) => navRow(docUrl(d.id), 'i-file', d.title, page === 'doc' && d.id === docId));
+    if (page === 'doc' && docId === null) rows.push(navRow(null, 'i-file', listTitle(NEW_DOC_IN_SET), true));
+    els.tree.replaceChildren(...rows.map((row) => {
       const li = document.createElement('li');
-      const sub = kids.get(n.id);
-
-      // 没有子文档的也占一个同样宽的位置，标题才能对齐
-      const toggle = document.createElement(sub ? 'button' : 'span');
-      toggle.className = 'tree-toggle';
-      if (sub) {
-        toggle.innerHTML = '<i class="icon i-chevron"></i>';
-        toggle.title = '展开 / 收起';
-        toggle.onclick = () => {
-          if (li.classList.toggle('open')) treeOpen.add(n.id);
-          else treeOpen.delete(n.id);
-        };
-      }
-
-      const link = document.createElement('a');
-      link.className = 'tree-title';
-      link.textContent = n.title || '无标题';
-      link.classList.toggle('untitled', !n.title);
-      if (n.id) link.href = `/doc/${n.id}${keyParam()}`;
-      if (n.id === current) link.setAttribute('aria-current', 'page');
-
-      const row = document.createElement('div');
-      row.className = 'tree-row';
-      row.classList.toggle('active', n.id === current);
-      row.style.setProperty('--depth', depth);
-      row.append(toggle, link);
-
-      // 编辑模式下每一行都能直接在它下面新建子文档
-      if (state.canEdit && n.id) {
-        const add = document.createElement('a');
-        add.className = 'btn btn-icon tree-add';
-        add.href = newChildUrl(n.id);
-        add.title = '在这篇下面新建子文档';
-        add.innerHTML = '<i class="icon i-plus"></i>';
-        row.append(add);
-      }
-
       li.append(row);
-      if (sub) {
-        const ul = document.createElement('ul');
-        ul.append(...build(n.id, depth + 1));
-        li.append(ul);
-        li.classList.toggle('open', treeOpen.has(n.id));
-      }
       return li;
-    });
-
-    els.tree.replaceChildren(...build(null, 0));
+    }));
+    els.sidebarNew.hidden = !state.canEdit;
+    els.sidebarNew.href = newDocUrl(docSet.id);
   }
 
   // 编辑时目录里当前这篇的标题跟着变
-  function updateTreeTitle(md) {
-    const node = tree.find((n) => n.id === (docId ?? ''));
-    const link = els.tree.querySelector('.tree-row.active .tree-title');
-    if (!node || !link) return;
-    node.title = treeTitle(md);
-    link.textContent = node.title || '无标题';
-    link.classList.toggle('untitled', !node.title);
+  function updateSidebarTitle(md) {
+    if (page !== 'doc' || !docSet?.id) return;
+    const title = listTitle(md);
+    const item = docSet.docs.find((d) => d.id === docId);
+    if (item) item.title = title;
+    const label = els.tree.querySelector('[aria-current] .tree-title');
+    if (!label) return;
+    label.textContent = title || '无标题';
+    label.classList.toggle('untitled', !title);
   }
 
-  // 有没保存的修改时先存好再跳过去，免得浏览器问「确定要离开吗」
-  async function go(url) {
-    if (isDirty()) await save();
-    location.href = url;
+  // ---------- 文档集的目录页 ----------
+
+  // 文档集只有名称，没有正文：目录页列出集里的文档，点了切换过去。
+  // 编辑模式下名称是输入框：新文档集（/set/new）起好名字点「创建」才在服务器上建，已有的改完名字自动保存
+  let renaming = null; // 正在保存的改名，切换页面前要等它
+
+  const formatTime = (ts) => `更新于 ${new Date(ts).toLocaleString()}`;
+
+  function renderSetPage() {
+    const isNew = !docSet.id;
+    els.setTitle.hidden = state.canEdit;
+    els.setTitle.textContent = docSet.title;
+    els.setForm.hidden = !state.canEdit;
+    els.setTitleInput.value = docSet.title;
+    els.setCreateBtn.hidden = els.setNewHint.hidden = !isNew;
+    els.setDocsSection.hidden = isNew;
+    els.setUpdatedLabel.textContent = isNew ? '' : formatTime(docSet.updatedAt);
+    if (isNew) return els.setTitleInput.focus();
+
+    els.setNewDoc.hidden = !state.canEdit;
+    els.setNewDoc.href = newDocUrl(docSet.id);
+    if (!docSet.docs.length) return note(els.setDocs, state.canEdit ? '还没有文档，点「新建文档」写第一篇' : '还没有文档');
+    els.setDocs.replaceChildren(...docSet.docs.map((d) => {
+      const link = document.createElement('a');
+      link.className = 'title';
+      link.dataset.nav = '';
+      link.href = docUrl(d.id);
+      link.textContent = d.title || '无标题';
+      link.classList.toggle('untitled', !d.title);
+      const time = document.createElement('small');
+      time.textContent = formatTime(d.updatedAt);
+      const li = document.createElement('li');
+      li.append(link, time);
+      return li;
+    }));
   }
 
-  els.tree.addEventListener('click', (e) => {
-    const a = e.target.closest('a[href]');
-    if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return; // 按着 Ctrl 等键是要在新标签页打开，照常处理
-    e.preventDefault();
-    if (a.matches('[aria-current]')) {
-      if (narrow.matches) showSidebar(false); // 点的就是当前这篇：窄屏上收起目录，好看正文
+  const inputTitle = () => els.setTitleInput.value.trim();
+
+  async function createSet() {
+    const title = inputTitle();
+    if (!title) return els.setTitleInput.focus();
+    els.setCreateBtn.disabled = true;
+    setStatus('创建中…');
+    const res = await api('/api/set', { title }).catch(() => null);
+    els.setCreateBtn.disabled = false;
+    if (!res?.ok) return setStatus(`创建失败：${res?.data.error || '网络错误'}`, true);
+
+    state.editKey = res.data.editKey;
+    docSet = { id: res.data.setId, title, updatedAt: res.data.updatedAt, docs: [] };
+    history.replaceState(null, '', setUrl(docSet.id));
+    currentUrl = location.href;
+    rememberMine({ setId: docSet.id, title });
+    setStatus('');
+    setPageTitle(title);
+    renderSetPage();
+    renderSidebar();
+    updateSavedButtons();
+    setupLinkBar(true);
+  }
+
+  function renameSet() {
+    const set = docSet;
+    const title = inputTitle();
+    if (!title || title === set.title) {
+      els.setTitleInput.value = set.title;
       return;
     }
-    go(a.href);
+    setStatus('保存中…');
+    renaming = api(`/api/set/${set.id}`, { editKey: state.editKey, title }).catch(() => null).then((res) => {
+      renaming = null;
+      if (!res?.ok) return setStatus(`改名失败：${res?.data.error || '网络错误'}`, true);
+      set.title = title;
+      set.updatedAt = res.data.updatedAt;
+      rememberTitle(set.id, title);
+      if (set !== docSet || page !== 'set') return; // 已经切到别的页面了
+      setStatus('已保存');
+      setPageTitle(title);
+      els.setUpdatedLabel.textContent = formatTime(set.updatedAt);
+      renderSidebar();
+    });
+  }
+
+  els.setForm.onsubmit = (e) => {
+    e.preventDefault();
+    if (docSet.id) renameSet();
+    else createSet();
+  };
+  // 改完名字点别处（输入框失去焦点）就保存
+  els.setTitleInput.onchange = () => docSet.id && renameSet();
+
+  // ---------- 切换页面 ----------
+
+  // 文档集里的链接（目录、目录页的文档列表、「新建文档」）都带 data-nav：点了在当前页面切换，不重新加载。
+  // 地址栏跟着变，浏览器的后退、前进也能用，复制出去的地址直接打开就是那一页
+  let routeSeq = 0;               // 连着点了好几下时，只显示最后点的那个
+  let currentUrl = location.href; // 当前显示的页面的地址
+
+  // 离开当前页面前把正在改的文档存好；存不了（比如断网）就问一下要不要丢掉修改
+  async function leave() {
+    await renaming;
+    if (saving || isDirty()) await save();
+    return !isDirty() || confirm('这篇文档还有修改没保存成功，离开的话这些修改会丢掉。确定离开吗？');
+  }
+
+  const showCurrentPage = () => route().catch(() => showMessage('加载失败：网络超时或服务器没有响应，请刷新重试'));
+
+  async function go(url) {
+    if (!(await leave())) return;
+    history.pushState(null, '', url);
+    showCurrentPage();
+  }
+
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('a[data-nav][href]');
+    // 按着 Ctrl 等键是要在新标签页打开，照常处理
+    if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    if (narrow.matches && els.sidebar.contains(a)) showSidebar(false); // 窄屏上目录叠在正文上面，点完收起，好看正文
+    if (a.href !== location.href) go(a.href);
   });
-  els.childBtn.onclick = () => go(newChildUrl(docId));
+
+  // 后退、前进时地址栏已经变了：先存好当前文档再切过去，用户选择留下的话把地址改回来
+  addEventListener('popstate', async () => {
+    if (await leave()) showCurrentPage();
+    else history.pushState(null, '', currentUrl);
+  });
+
+  // 换了一页，滚回开头
+  function scrollToTop() {
+    scrollTo(0, 0);
+    for (const el of els.workspace.querySelectorAll('.pane-body, .vditor-sv, .vditor-wysiwyg, .vditor-preview')) el.scrollTop = 0;
+  }
+
+  // 按地址栏显示对应的页面：/doc/ID、/doc/new（带 ?set=文档集ID 是建在集里）、/set/ID、/set/new
+  async function route() {
+    const seq = ++routeSeq;
+    const stale = () => seq !== routeSeq;
+    currentUrl = location.href;
+    const [, kind, id = ''] = location.pathname.split('/');
+    els.onlineCount.textContent = '–';
+
+    if (kind === 'set') {
+      let set = { id: null, title: '', updatedAt: null, docs: [] };
+      if (id !== 'new') {
+        const { ok, status, data } = await api(`/api/set/${id}`);
+        if (stale()) return;
+        if (!ok) return showMessage(status === 404 ? '文档集不存在。' : `加载失败：${data.error || status}`);
+        set = data;
+      }
+      docSet = set;
+      docId = null;
+      newDocSet = null;
+      showPage('set');
+      setStatus('');
+      setPageTitle(docSet.title || '新建文档集');
+      renderSetPage();
+      renderSidebar();
+      setupLinkBar();
+      scrollToTop();
+      return;
+    }
+
+    if (id === 'new') {
+      const setId = new URLSearchParams(location.search).get('set');
+      if (!state.canEdit) return showMessage('编辑密钥无效，不能新建文档。');
+      let set = null;
+      if (setId) {
+        set = docSet?.id === setId ? docSet : null;
+        if (!set) {
+          const { ok, status, data } = await api(`/api/set/${encodeURIComponent(setId)}`);
+          if (stale()) return;
+          if (!ok) return showMessage(status === 404 ? '文档集不存在，没法在里面新建文档。' : `加载失败：${data.error || status}`);
+          set = data;
+        }
+      }
+      docSet = set;
+      docId = null;
+      newDocSet = setId;
+      state.updatedAt = null;
+      showPage('doc');
+      renderSidebar();
+      setupLinkBar();
+      const template = setId ? NEW_DOC_IN_SET : WELCOME;
+      await ensureEditor(template);
+      if (stale()) return;
+      updateTitle(template);
+      setStatus('尚未保存');
+      scrollToTop();
+      return;
+    }
+
+    if (!id) return showMessage('链接不完整，请从文档首页新建或打开文档。');
+    const { ok, status, data } = await api(`/api/doc/${id}?set=1`);
+    if (stale()) return;
+    if (!ok) return showMessage(status === 404 ? '文档不存在。' : `加载失败：${data.error || status}`);
+    docId = id;
+    newDocSet = null;
+    docSet = data.set;
+    showPage('doc');
+    renderSidebar();
+    setupLinkBar();
+    await showContent(data.content, data.updatedAt);
+    if (stale()) return;
+    if (state.canEdit) setStatus('已保存');
+    scrollToTop();
+    heartbeat({ force: true });
+  }
 
   // ---------- 历史版本 ----------
 
@@ -983,11 +1226,14 @@ flowchart TD
 
   // ---------- 在线人数 ----------
 
-  // 心跳接口同时返回在线人数和文档当前版本，版本变了才去拉全文
+  // 心跳接口同时返回在线人数和文档当前版本，版本变了才去拉全文。
+  // 文档集的目录页、还没保存的新文档不上报
   async function heartbeat({ force = false } = {}) {
+    if (page !== 'doc' || !docId) return;
     if (document.hidden && !force) return; // 后台标签页不上报，省请求次数和写入额度
-    const res = await api(`/api/presence/${docId}`, { anonId }).catch(() => null);
-    if (!res?.ok) return;
+    const id = docId;
+    const res = await api(`/api/presence/${id}`, { anonId }).catch(() => null);
+    if (!res?.ok || id !== docId) return; // 等结果的时候已经切到别的文档了
     els.onlineCount.textContent = res.data.online;
     if (res.data.updatedAt !== state.updatedAt) refresh();
   }
@@ -995,12 +1241,15 @@ flowchart TD
   // ---------- 拉取别人保存的新内容 ----------
 
   async function refresh() {
-    if (document.hidden || state.saving || isDirty()) return; // 有未保存的修改时交给保存时的冲突处理
-    const { ok, data } = await api(`/api/doc/${docId}?tree=1`);
-    if (!ok) return;
-    setTree(data.tree); // 顺带更新目录：别人可能新建了子文档、改了标题
+    if (document.hidden || saving || isDirty()) return; // 有未保存的修改时交给保存时的冲突处理
+    const id = docId;
+    const { ok, data } = await api(`/api/doc/${id}?set=1`);
+    if (!ok || id !== docId || page !== 'doc') return;
+    // 顺带更新目录：别人可能在集里新建了文档、改了标题
+    docSet = data.set;
+    renderSidebar();
     if (data.updatedAt === state.updatedAt || isDirty()) return;
-    applyRemote(data.content, data.updatedAt);
+    showContent(data.content, data.updatedAt);
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -1008,72 +1257,25 @@ flowchart TD
     heartbeat(); // 切回来立刻报一次，顺便检查离开期间有没有人保存
   });
 
-  function startSync() {
-    heartbeat({ force: true });
-    setInterval(heartbeat, PRESENCE_INTERVAL_MS);
-  }
-
   // ---------- 启动 ----------
 
   async function init() {
-    if (docId === null) {
-      // 新文档：还没有链接和历史，也不能在它下面建子文档，这几个按钮等第一次保存后再出现
-      els.historyBtn.hidden = els.linksBtn.hidden = els.childBtn.hidden = true;
-      // 新建子文档：先取父文档所在的树，目录里放一个占位的「新文档」，看得出会建在哪里
-      let nodes = [];
-      if (parentId) {
-        const { ok, status, data } = await api(`/api/doc/${encodeURIComponent(parentId)}?tree=1`);
-        if (!ok) {
-          if (status === 404) els.preview.innerHTML = '<p>父文档不存在，没法在它下面新建子文档。<a href="/">回文档首页</a></p>';
-          else note(els.preview, `加载失败：${data.error || status}`);
-          return;
-        }
-        nodes = [...data.tree, { id: '', parentId, title: treeTitle(WELCOME) }];
-      }
-      updateTitle(WELCOME);
-      await enterEditMode(WELCOME);
-      setTree(nodes);
-      setStatus('尚未保存');
-      return;
+    const [, kind, id = ''] = location.pathname.split('/');
+    const setId = new URLSearchParams(location.search).get('set');
+    // 新建文档、新建文档集不用密钥（建好了才有）；在文档集里新建文档要用文档集的密钥
+    const creating = id === 'new' && !(kind === 'doc' && setId);
+    let editable = creating;
+    if (!creating && id && state.editKey) {
+      // 不带内容（名称）的 POST 只校验密钥，不写入
+      const path = kind === 'set' ? `/api/set/${id}` : id === 'new' ? `/api/set/${encodeURIComponent(setId)}` : `/api/doc/${id}`;
+      const check = await api(path, { editKey: state.editKey });
+      editable = check.ok;
+      if (check.status === 403) showError('编辑密钥无效，已切换为只读模式。');
     }
-    if (!docId) {
-      els.preview.innerHTML = '<p>链接不完整。请从 <a href="/">文档首页</a> 新建或打开文档。</p>';
-      return;
-    }
-
-    const { ok, status, data } = await api(`/api/doc/${docId}?tree=1`);
-    if (!ok) {
-      if (status === 404) els.preview.innerHTML = '<p>文档不存在。<a href="/">新建一个？</a></p>';
-      else note(els.preview, `加载失败：${data.error || status}`);
-      return;
-    }
-    let { content, updatedAt } = data;
-
-    let editable = false;
-    if (state.editKey) {
-      // 用“保存相同内容”校验密钥：内容没变时服务器只比对密钥、不写入
-      const check = await api(`/api/doc/${docId}`, { editKey: state.editKey, content, baseUpdatedAt: updatedAt });
-      editable = check.ok || check.status === 409;
-      if (check.status === 409) ({ content, updatedAt } = check.data); // 刚好有人保存了，用最新的
-      if (!editable) showError('编辑密钥无效，已切换为只读模式。');
-    }
-
-    if (editable) {
-      setUpdatedAt(updatedAt);
-      updateTitle(content);
-      setupLinkBar();
-      await enterEditMode(content);
-    } else {
-      applyRemote(content, updatedAt);
-      els.shareBtn.hidden = false; // 编辑模式下链接栏里已经有复制按钮
-    }
-    setTree(data.tree); // 要等确定了能不能编辑：编辑模式下目录里的链接才带密钥
-
-    startSync();
+    setEditable(editable);
+    await route();
+    setInterval(heartbeat, PRESENCE_INTERVAL_MS);
   }
 
-  init().catch(() => {
-    els.readerPane.hidden = false;
-    note(els.preview, '加载失败：网络超时或服务器没有响应，请刷新重试');
-  });
+  init().catch(() => showMessage('加载失败：网络超时或服务器没有响应，请刷新重试'));
 })();

@@ -27,7 +27,7 @@
 
             <span class="status" id="status"></span>
 
-            <!-- 有子文档（或者这篇是子文档）时才出现 -->
+            <!-- 在文档集里时才出现 -->
             <button class="btn" id="treeBtn" title="显示 / 收起目录" hidden>
                 <i class="icon i-sidebar"></i><span>目录</span>
             </button>
@@ -38,11 +38,8 @@
                 <button class="btn" id="linksBtn" title="显示 / 收起链接栏">
                     <i class="icon i-link"></i><span>链接</span>
                 </button>
-                <button class="btn" id="childBtn" title="在这篇文档下面新建一篇子文档">
-                    <i class="icon i-file-plus"></i><span>子文档</span>
-                </button>
             </span>
-            <button class="btn" id="shareBtn" title="复制这篇文档的链接，发给别人就能看" hidden>
+            <button class="btn" id="shareBtn" title="复制这一页的链接，发给别人就能看" hidden>
                 <i class="icon i-share"></i><span>复制链接</span>
             </button>
             <button class="btn" id="downloadBtn" title="下载 .md">
@@ -56,12 +53,12 @@
             </button>
             <button class="btn btn-icon" onclick="toggleTheme()" title="切换夜间模式"><i class="icon i-theme"></i></button>
 
-            <span class="online"><span class="dot"></span><span><b id="onlineCount">–</b> 人<span class="online-long">正在编辑</span></span></span>
+            <span class="online" id="online"><span class="dot"></span><span><b id="onlineCount">–</b> 人<span class="online-long">正在编辑</span></span></span>
         </header>
 
         <div class="banner" id="linkBar" hidden>
             <p class="banner-text" id="linkHint" hidden>
-                <b>文档已创建。</b><b>只读链接</b>可以随便分享；<b>编辑链接</b>请自己收好，丢了就不能再编辑。
+                <b><span id="linkHintWhat">文档</span>已创建。</b><b>只读链接</b>可以随便分享；<b>编辑链接</b>请自己收好，丢了就不能再编辑。
             </p>
             <div class="copy-field">
                 <span class="copy-label"><i class="icon i-eye"></i>只读链接</span>
@@ -80,13 +77,37 @@
     </div>
 
     <main class="workspace reading" id="workspace">
-        <!-- 目录：这篇文档所在的整棵树（父文档、子文档），点了整页跳过去 -->
+        <!-- 目录：所在的文档集和里面的文档，点了在当前页面切换（见 editor.js「切换页面」） -->
         <aside class="pane sidebar" id="sidebar" hidden>
             <div class="pane-head"><b>目录</b></div>
             <nav class="pane-body">
+                <div class="tree-set" id="sidebarSet"></div>
                 <ul class="tree" id="tree"></ul>
+                <a class="btn tree-new" id="sidebarNew" data-nav hidden><i class="icon i-plus"></i><span>新建文档</span></a>
             </nav>
         </aside>
+        <!-- 文档集的目录页：名称和里面的文档 -->
+        <section class="pane reader" id="setPane" hidden>
+            <div class="pane-head"><b>文档集</b><span id="setUpdatedLabel"></span></div>
+            <div class="pane-body">
+                <div class="set-page">
+                    <h1 class="set-title" id="setTitle"></h1>
+                    <form class="set-form" id="setForm" hidden>
+                        <input class="set-title-input" id="setTitleInput" maxlength="80" placeholder="给文档集起个名字" autocomplete="off" aria-label="文档集名称" />
+                        <button class="btn btn-primary" id="setCreateBtn"><i class="icon i-folder-plus"></i><span>创建文档集</span></button>
+                    </form>
+                    <p class="set-hint" id="setNewHint" hidden>文档集用来把几篇文档归在一起，左边的目录里点一下就能切换，本身没有正文。起好名字点「创建文档集」，之后就能往里面加文档。</p>
+                    <div id="setDocsSection">
+                        <div class="set-docs-head">
+                            <b>文档</b>
+                            <span class="spacer"></span>
+                            <a class="btn btn-outline" id="setNewDoc" data-nav hidden><i class="icon i-plus"></i><span>新建文档</span></a>
+                        </div>
+                        <ul class="doc-list" id="setDocs"></ul>
+                    </div>
+                </div>
+            </div>
+        </section>
         <!-- 编辑模式：Vditor 编辑器（所见即所得 / 即时渲染 / 分屏，工具栏里切换） -->
         <section class="pane" id="editorPane" hidden>
             <div id="vditor"></div>

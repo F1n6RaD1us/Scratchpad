@@ -34,11 +34,11 @@
 
         <section id="panel" hidden>
             <div class="admin-head">
-                <h1>全部文档 <small id="count"></small></h1>
+                <h1>全部文档和文档集 <small id="count"></small></h1>
                 <span class="spacer"></span>
                 <label class="search">
                     <i class="icon i-search"></i>
-                    <input type="search" id="search" placeholder="搜索标题或 ID" />
+                    <input type="search" id="search" placeholder="搜索标题、名称或 ID" />
                 </label>
                 <button class="btn btn-outline btn-icon" id="refreshBtn" title="刷新"><i class="icon i-refresh"></i></button>
             </div>
@@ -49,7 +49,7 @@
                 <button class="btn btn-outline btn-danger" id="purgeImagesBtn" hidden><i class="icon i-trash"></i><span>删除过期图片</span></button>
             </div>
             <ul class="doc-list admin-list" id="docList"></ul>
-            <p class="hint">删除是永久的：文档、全部历史版本和上传的图片都会删掉，它下面的子文档也一起删掉，只能用 D1 的「时间旅行」把整个数据库恢复到删除之前。</p>
+            <p class="hint">删除是永久的：文档、全部历史版本和上传的图片都会删掉，删文档集会连里面的文档一起删掉，只能用 D1 的「时间旅行」把整个数据库恢复到删除之前。</p>
         </section>
     </main>
 
@@ -58,6 +58,7 @@
         const PASSWORD_KEY = 'shareddoc:admin';
         const $ = (id) => document.getElementById(id);
         let docs = [];
+        let sets = [];
         let images = null; // 上传到本站的图片统计，见 /api/admin/docs
 
         async function api(path, method = 'GET') {
@@ -87,6 +88,7 @@
                 return;
             }
             docs = data.docs;
+            sets = data.sets;
             images = data.images;
             $('loginForm').hidden = true;
             $('panel').hidden = $('logoutBtn').hidden = false;
@@ -115,7 +117,10 @@
                     : '没有上传超过一年的图片。');
         }
 
-        const viewUrl = (d) => `${location.origin}/doc/${d.id}`;
+        // 文档和文档集排在同一个列表里，按更新时间排
+        const items = () => [...sets.map((s) => ({ ...s, isSet: true })), ...docs].sort((a, b) => b.updatedAt - a.updatedAt);
+        const pagePath = (d) => `/${d.isSet ? 'set' : 'doc'}/${d.id}`;
+        const viewUrl = (d) => `${location.origin}${pagePath(d)}`;
         const editUrl = (d) => `${viewUrl(d)}?key=${encodeURIComponent(d.editKey)}`;
 
         // 打开按钮和它右边的复制按钮拼成一组，一眼能看出复制的是哪个链接
@@ -149,45 +154,43 @@
 
         function render() {
             renderImages();
+            const all = items();
             const q = $('search').value.trim().toLowerCase();
-            const shown = q ? docs.filter((d) => d.title.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)) : docs;
-            $('count').textContent = q ? `${shown.length} / ${docs.length}` : docs.length;
+            const shown = q ? all.filter((d) => d.title.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)) : all;
+            $('count').textContent = q ? `${shown.length} / ${all.length}` : all.length;
 
             if (shown.length === 0) {
                 const li = document.createElement('li');
                 li.className = 'empty';
-                li.textContent = docs.length ? '没有匹配的文档' : '数据库里还没有文档';
+                li.textContent = all.length ? '没有匹配的文档' : '数据库里还没有文档';
                 $('docList').replaceChildren(li);
                 return;
             }
 
-            // 父文档 → 子文档，用来显示层级、删除前数出会连带删掉几篇
-            const byId = new Map(docs.map((d) => [d.id, d]));
-            const kids = new Map();
-            for (const d of docs) if (d.parentId) kids.set(d.parentId, [...(kids.get(d.parentId) || []), d]);
-            const countSub = (id) => (kids.get(id) || []).reduce((n, d) => n + 1 + countSub(d.id), 0);
+            const setById = new Map(sets.map((s) => [s.id, s]));
 
             $('docList').replaceChildren(...shown.map((d) => {
-                const parent = byId.get(d.parentId);
-                const sub = countSub(d.id);
+                const set = setById.get(d.setId);
 
                 const title = document.createElement('a');
                 title.className = 'title';
-                title.href = `/doc/${d.id}`;
+                title.href = pagePath(d);
                 title.target = '_blank';
                 title.textContent = d.title || '无标题';
                 title.classList.toggle('untitled', !d.title);
+                if (d.isSet) title.prepend(Object.assign(document.createElement('i'), { className: 'icon i-folder' }));
 
                 const meta = document.createElement('small');
-                meta.textContent = [
-                    d.id,
-                    parent && `「${parent.title || parent.id}」的子文档`,
-                    sub && `${sub} 篇子文档`,
-                    `更新于 ${new Date(d.updatedAt).toLocaleString()}`,
-                    `${d.length} 字`,
-                    `${d.versions} 个历史版本`,
-                    d.images && `${d.images} 张图片`,
-                ].filter(Boolean).join(' · ');
+                meta.textContent = (d.isSet
+                    ? [d.id, `文档集 · ${d.docs} 篇文档`, `更新于 ${new Date(d.updatedAt).toLocaleString()}`]
+                    : [
+                        d.id,
+                        set && `在「${set.title}」里`,
+                        `更新于 ${new Date(d.updatedAt).toLocaleString()}`,
+                        `${d.length} 字`,
+                        `${d.versions} 个历史版本`,
+                        d.images && `${d.images} 张图片`,
+                    ]).filter(Boolean).join(' · ');
 
                 const info = document.createElement('div');
                 info.className = 'doc-info';
@@ -198,15 +201,17 @@
 
                 const remove = button('button', 'btn-icon btn-danger', 'i-trash', '', '永久删除');
                 remove.onclick = async () => {
-                    const what = sub ? `「${d.title || d.id}」和它下面的 ${sub} 篇子文档` : `「${d.title || d.id}」`;
-                    if (!confirm(`永久删除${what}？\n文档、全部历史版本和上传的图片都会删掉，拿着链接的人也打不开了。`)) return;
+                    const what = d.isSet
+                        ? `文档集「${d.title}」和里面的 ${d.docs} 篇文档？\n这些文档的全部历史版本和上传的图片都会删掉`
+                        : `「${d.title || d.id}」？\n文档、全部历史版本和上传的图片都会删掉`;
+                    if (!confirm(`永久删除${what}，拿着链接的人也打不开了。`)) return;
                     remove.disabled = true;
-                    const res = await api(`/api/admin/docs/${d.id}`, 'DELETE').catch(() => null);
+                    const res = await api(`/api/admin/${d.isSet ? 'sets' : 'docs'}/${d.id}`, 'DELETE').catch(() => null);
                     // 404 说明已经不在了，同样从列表里去掉
                     if (res?.ok || res?.status === 404) {
+                        if (d.isSet || d.images || d.setId) return load(); // 连带删了文档、图片，或者文档集的篇数变了，重新加载
                         docs = docs.filter((x) => x.id !== d.id);
-                        if (d.images || sub) load(); // 它的图片、子文档也删了，重新加载列表和图片统计
-                        else render();
+                        render();
                     } else {
                         remove.disabled = false;
                         alert(`删除失败：${res?.data.error || '网络超时或服务器没有响应'}`);
@@ -229,6 +234,7 @@
         $('logoutBtn').onclick = () => {
             sessionStorage.removeItem(PASSWORD_KEY);
             docs = [];
+            sets = [];
             $('docList').replaceChildren();
             showLogin();
         };
