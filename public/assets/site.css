@@ -96,6 +96,7 @@ body.glow {
 }
 
 .i-arrow-left { --i: url("/vendor/lucide/arrow-left.svg"); }
+.i-chevron { --i: url("/vendor/lucide/chevron-right.svg"); }
 .i-columns { --i: url("/vendor/lucide/columns-2.svg"); }
 .i-copy { --i: url("/vendor/lucide/copy.svg"); }
 .i-download { --i: url("/vendor/lucide/download.svg"); }
@@ -1214,6 +1215,55 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
   white-space: nowrap;
 }
 
+/* 后台列表每一项是一个 .admin-row；文档集那一行下面是集里的文档，默认收起 */
+.admin-list li {
+  display: block;
+  padding: 0;
+}
+
+.admin-list li.empty {
+  padding: 24px;
+}
+
+.admin-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 10px 10px 8px;
+}
+
+/* 行首展开 / 收起的按钮；单独的文档在这个位置放一个同样宽的空位，标题才对齐 */
+.set-toggle {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+}
+
+.set-toggle .icon {
+  transition: transform 0.15s;
+}
+
+.set-group.open > .admin-row .set-toggle .icon {
+  transform: rotate(90deg);
+}
+
+.set-children {
+  display: none;
+  list-style: none;
+  border-top: 1px solid var(--line);
+  background: var(--code-bg);
+}
+
+.set-group.open > .set-children {
+  display: block;
+}
+
+/* 集里的文档往里缩，标题和文档集名称（文件夹图标后面的字）对齐 */
+.set-children .admin-row {
+  padding-left: 62px;
+}
+
 /* 「打开」和「复制链接」两个按钮拼在一起 */
 .btn-pair {
   display: inline-flex;
@@ -1346,13 +1396,22 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
     width: auto;
   }
 
-  .admin-list li {
+  .admin-row {
     flex-wrap: wrap;
   }
 
   .doc-info {
     flex-basis: 100%;
     margin-bottom: 4px;
+  }
+
+  /* 展开按钮和标题留在同一行 */
+  .set-toggle + .doc-info {
+    flex-basis: calc(100% - 32px);
+  }
+
+  .set-children .admin-row {
+    padding-left: 40px;
   }
 
   .version-list {

@@ -117,8 +117,6 @@
                     : '没有上传超过一年的图片。');
         }
 
-        // 文档和文档集排在同一个列表里，按更新时间排
-        const items = () => [...sets.map((s) => ({ ...s, isSet: true })), ...docs].sort((a, b) => b.updatedAt - a.updatedAt);
         const pagePath = (d) => `/${d.isSet ? 'set' : 'doc'}/${d.id}`;
         const viewUrl = (d) => `${location.origin}${pagePath(d)}`;
         const editUrl = (d) => `${viewUrl(d)}?key=${encodeURIComponent(d.editKey)}`;
@@ -152,76 +150,135 @@
             return pair;
         }
 
+        // 列表里的一行：标题、概要、编辑 / 只读链接、删除。toggle 是行首展开 / 收起文档集的按钮（单独的文档放一个同样宽的空位，标题才对齐）
+        function row(d, toggle) {
+            const title = document.createElement('a');
+            title.className = 'title';
+            title.href = pagePath(d);
+            title.target = '_blank';
+            title.textContent = d.title || '无标题';
+            title.classList.toggle('untitled', !d.title);
+            if (d.isSet) title.prepend(Object.assign(document.createElement('i'), { className: 'icon i-folder' }));
+
+            const meta = document.createElement('small');
+            meta.textContent = (d.isSet
+                ? [d.id, `${d.docs} 篇文档`, `更新于 ${new Date(d.updatedAt).toLocaleString()}`]
+                : [
+                    d.id,
+                    `更新于 ${new Date(d.updatedAt).toLocaleString()}`,
+                    `${d.length} 字`,
+                    `${d.versions} 个历史版本`,
+                    d.images && `${d.images} 张图片`,
+                ]).filter(Boolean).join(' · ');
+
+            const info = document.createElement('div');
+            info.className = 'doc-info';
+            info.append(title, meta);
+
+            const edit = linkPair('i-pencil', '编辑', editUrl(d), '复制编辑链接（拿到的人可以修改）');
+            const view = linkPair('i-eye', '只读', viewUrl(d), '复制只读链接（可以随便分享）');
+
+            const remove = button('button', 'btn-icon btn-danger', 'i-trash', '', '永久删除');
+            remove.onclick = async () => {
+                const what = d.isSet
+                    ? `文档集「${d.title}」和里面的 ${d.docs} 篇文档？\n这些文档的全部历史版本和上传的图片都会删掉`
+                    : `「${d.title || d.id}」？\n文档、全部历史版本和上传的图片都会删掉`;
+                if (!confirm(`永久删除${what}，拿着链接的人也打不开了。`)) return;
+                remove.disabled = true;
+                const res = await api(`/api/admin/${d.isSet ? 'sets' : 'docs'}/${d.id}`, 'DELETE').catch(() => null);
+                // 404 说明已经不在了，同样从列表里去掉
+                if (res?.ok || res?.status === 404) {
+                    if (d.isSet || d.images || d.setId) return load(); // 连带删了文档、图片，或者文档集的篇数变了，重新加载
+                    docs = docs.filter((x) => x.id !== d.id);
+                    render();
+                } else {
+                    remove.disabled = false;
+                    alert(`删除失败：${res?.data.error || '网络超时或服务器没有响应'}`);
+                }
+            };
+
+            const div = document.createElement('div');
+            div.className = 'admin-row';
+            if (toggle) div.append(toggle);
+            div.append(info, edit, view, remove);
+            return div;
+        }
+
+        // 展开着的文档集。默认都收起；只存在内存里，搜索、删除后重新显示列表时保持原样
+        const expanded = new Set();
+
+        function setGroup(set, kids, autoOpen) {
+            const li = document.createElement('li');
+            li.className = 'set-group';
+            const toggle = button('button', 'btn-icon set-toggle', 'i-chevron', '', '展开 / 收起里面的文档');
+            const setOpen = (open) => {
+                li.classList.toggle('open', open);
+                toggle.setAttribute('aria-expanded', String(open));
+            };
+            setOpen(expanded.has(set.id) || autoOpen);
+            toggle.onclick = () => {
+                const open = !li.classList.contains('open');
+                if (open) expanded.add(set.id);
+                else expanded.delete(set.id);
+                setOpen(open);
+            };
+            toggle.disabled = !kids.length;
+
+            const ul = document.createElement('ul');
+            ul.className = 'set-children';
+            ul.append(...kids.map((d) => {
+                const kid = document.createElement('li');
+                kid.append(row(d));
+                return kid;
+            }));
+            li.append(row(set, toggle), ul);
+            return li;
+        }
+
         function render() {
             renderImages();
-            const all = items();
             const q = $('search').value.trim().toLowerCase();
-            const shown = q ? all.filter((d) => d.title.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)) : all;
-            $('count').textContent = q ? `${shown.length} / ${all.length}` : all.length;
+            const match = (d) => d.title.toLowerCase().includes(q) || d.id.toLowerCase().includes(q);
 
-            if (shown.length === 0) {
+            // 文档集里的文档收在文档集下面，按创建时间排（和文档集目录里的顺序一样）；
+            // 最外层只放文档集和单独的文档，按更新时间排
+            const kidsOf = new Map(sets.map((s) => [s.id, []]));
+            const loose = [];
+            for (const d of docs) (kidsOf.get(d.setId) ?? loose).push(d);
+            for (const kids of kidsOf.values()) kids.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+
+            // 搜索时：文档集名称匹配就列出整个文档集；只有集里的文档匹配，就只列出这几篇，并自动展开
+            const entries = [];
+            for (const set of sets) {
+                const kids = kidsOf.get(set.id);
+                const matched = q ? kids.filter(match) : [];
+                if (q && !match(set) && !matched.length) continue;
+                entries.push({ at: set.updatedAt, el: () => setGroup({ ...set, isSet: true }, q && !match(set) ? matched : kids, matched.length > 0) });
+            }
+            for (const d of loose) {
+                if (q && !match(d)) continue;
+                entries.push({
+                    at: d.updatedAt,
+                    el: () => {
+                        const li = document.createElement('li');
+                        li.append(row(d, Object.assign(document.createElement('span'), { className: 'set-toggle' })));
+                        return li;
+                    },
+                });
+            }
+            entries.sort((a, b) => b.at - a.at);
+
+            const found = q ? sets.filter(match).length + docs.filter(match).length : 0;
+            $('count').textContent = q ? `找到 ${found} 项` : `${sets.length} 个文档集 · ${docs.length} 篇文档`;
+
+            if (entries.length === 0) {
                 const li = document.createElement('li');
                 li.className = 'empty';
-                li.textContent = all.length ? '没有匹配的文档' : '数据库里还没有文档';
+                li.textContent = sets.length || docs.length ? '没有匹配的文档' : '数据库里还没有文档';
                 $('docList').replaceChildren(li);
                 return;
             }
-
-            const setById = new Map(sets.map((s) => [s.id, s]));
-
-            $('docList').replaceChildren(...shown.map((d) => {
-                const set = setById.get(d.setId);
-
-                const title = document.createElement('a');
-                title.className = 'title';
-                title.href = pagePath(d);
-                title.target = '_blank';
-                title.textContent = d.title || '无标题';
-                title.classList.toggle('untitled', !d.title);
-                if (d.isSet) title.prepend(Object.assign(document.createElement('i'), { className: 'icon i-folder' }));
-
-                const meta = document.createElement('small');
-                meta.textContent = (d.isSet
-                    ? [d.id, `文档集 · ${d.docs} 篇文档`, `更新于 ${new Date(d.updatedAt).toLocaleString()}`]
-                    : [
-                        d.id,
-                        set && `在「${set.title}」里`,
-                        `更新于 ${new Date(d.updatedAt).toLocaleString()}`,
-                        `${d.length} 字`,
-                        `${d.versions} 个历史版本`,
-                        d.images && `${d.images} 张图片`,
-                    ]).filter(Boolean).join(' · ');
-
-                const info = document.createElement('div');
-                info.className = 'doc-info';
-                info.append(title, meta);
-
-                const edit = linkPair('i-pencil', '编辑', editUrl(d), '复制编辑链接（拿到的人可以修改）');
-                const view = linkPair('i-eye', '只读', viewUrl(d), '复制只读链接（可以随便分享）');
-
-                const remove = button('button', 'btn-icon btn-danger', 'i-trash', '', '永久删除');
-                remove.onclick = async () => {
-                    const what = d.isSet
-                        ? `文档集「${d.title}」和里面的 ${d.docs} 篇文档？\n这些文档的全部历史版本和上传的图片都会删掉`
-                        : `「${d.title || d.id}」？\n文档、全部历史版本和上传的图片都会删掉`;
-                    if (!confirm(`永久删除${what}，拿着链接的人也打不开了。`)) return;
-                    remove.disabled = true;
-                    const res = await api(`/api/admin/${d.isSet ? 'sets' : 'docs'}/${d.id}`, 'DELETE').catch(() => null);
-                    // 404 说明已经不在了，同样从列表里去掉
-                    if (res?.ok || res?.status === 404) {
-                        if (d.isSet || d.images || d.setId) return load(); // 连带删了文档、图片，或者文档集的篇数变了，重新加载
-                        docs = docs.filter((x) => x.id !== d.id);
-                        render();
-                    } else {
-                        remove.disabled = false;
-                        alert(`删除失败：${res?.data.error || '网络超时或服务器没有响应'}`);
-                    }
-                };
-
-                const li = document.createElement('li');
-                li.append(info, edit, view, remove);
-                return li;
-            }));
+            $('docList').replaceChildren(...entries.map((e) => e.el()));
         }
 
         $('loginForm').onsubmit = (e) => {
