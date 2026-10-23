@@ -260,8 +260,9 @@ flowchart TD
     els.updatedLabel.textContent = `更新于 ${new Date(ts).toLocaleString()}`;
   }
 
-  // 显示服务器上的内容（打开文档、在文档集里切换、别人保存了新内容）
+  // 显示服务器上的内容（打开文档、在文档集里切换、别人保存了新内容），顺带记进 docCache（见「切换页面」）
   async function showContent(content, updatedAt) {
+    docCache.set(docId, { content, updatedAt });
     setUpdatedAt(updatedAt);
     if (state.canEdit) {
       await ensureEditor(content);
@@ -377,6 +378,7 @@ flowchart TD
     p.append(`${text} `, home);
     els.preview.replaceChildren(p);
     setStatus('');
+    pageShown();
   }
 
   // 记住用户选的编辑模式（分屏预览 / 所见即所得），下次打开沿用
@@ -474,6 +476,7 @@ flowchart TD
       if (docId === null) onCreated(res.data);
       state.savedContent = content;
       setUpdatedAt(res.data.updatedAt);
+      docCache.set(docId, { content, updatedAt: res.data.updatedAt });
       rememberTitle(docId, docTitle(content));
       if (isDirty()) scheduleAutosave(); // 保存期间又有输入，再排一次
       else setStatus('已保存');
@@ -1060,9 +1063,77 @@ flowchart TD
   // ---------- 切换页面 ----------
 
   // 文档集里的链接（目录、目录页的文档列表、「新建文档」）都带 data-nav：点了在当前页面切换，不重新加载。
-  // 地址栏跟着变，浏览器的后退、前进也能用，复制出去的地址直接打开就是那一页
+  // 地址栏跟着变，浏览器的后退、前进也能用，复制出去的地址直接打开就是那一页。
+  // 切换慢主要慢在等服务器（Worker 加 D1 一趟往返，实例刚启动时更久），前端渲染只要几毫秒，所以：
+  // - 按下鼠标（手指）就开始请求，不等松开（见 prefetch）
+  // - 看过的文档先显示上次的内容，同时向服务器确认有没有更新（见 docCache）
+  // - 点了马上把目录里那一行标成当前、显示加载条，加载完正文淡入，看得出切换了
   let routeSeq = 0;               // 连着点了好几下时，只显示最后点的那个
   let currentUrl = location.href; // 当前显示的页面的地址
+
+  // 看过的文档 docId → { content, updatedAt }：服务器上的版本，打开、保存、拉取新内容时更新。
+  // 只存在这个页面里，刷新就没了
+  const docCache = new Map();
+
+  // 按下时提前发出的请求 { path, request, at }。只留最近一个，按下了没点（比如拖开了）的下次按下就丢掉；
+  // 太久没用上的也不用了，免得拿到旧内容
+  let prefetched = null;
+  const PREFETCH_MAX_AGE_MS = 10000;
+
+  // 页面地址要请求哪个接口；新建页面不用请求
+  function apiPathOf(url) {
+    const [, kind, id = ''] = new URL(url, location.href).pathname.split('/');
+    if (!id || id === 'new') return null;
+    return kind === 'set' ? `/api/set/${id}` : `/api/doc/${id}?set=1`;
+  }
+
+  // 优先用按下时提前发出的请求
+  function request(path) {
+    const ready = prefetched?.path === path && Date.now() - prefetched.at < PREFETCH_MAX_AGE_MS;
+    const pending = ready ? prefetched.request : api(path);
+    if (prefetched?.path === path) prefetched = null;
+    return pending;
+  }
+
+  function prefetch(url) {
+    const path = apiPathOf(url);
+    if (!path || prefetched?.path === path) return;
+    const pending = api(path);
+    pending.catch(() => {}); // 没用上的请求出错了不用管，用上的照常在 route 里报错
+    prefetched = { path, request: pending, at: Date.now() };
+  }
+
+  // 点了就先把目录里那一行标成当前，不用等内容加载完
+  function markCurrent(url) {
+    const { pathname } = new URL(url, location.href);
+    for (const a of els.sidebar.querySelectorAll('a.tree-row')) {
+      const current = Boolean(a.href) && new URL(a.href).pathname === pathname;
+      a.classList.toggle('active', current);
+      if (current) a.setAttribute('aria-current', 'page');
+      else a.removeAttribute('aria-current');
+    }
+  }
+
+  function startLoading(url) {
+    markCurrent(url);
+    els.workspace.classList.add('loading'); // 正文变淡、顶上显示加载条（见 site.css），网络快的话不会闪
+  }
+
+  // 内容显示出来了：去掉加载状态，正文淡入
+  function pageShown() {
+    els.workspace.classList.remove('loading');
+    const pane = [els.setPane, els.editorPane, els.readerPane].find((p) => !p.hidden);
+    if (!pane) return;
+    pane.classList.remove('page-in');
+    void pane.offsetWidth; // 先让浏览器排一次版，同一个元素的动画才能重新播放
+    pane.classList.add('page-in');
+  }
+
+  // 不切换了（用户选择留在当前文档）：恢复原样
+  function cancelLoading() {
+    els.workspace.classList.remove('loading');
+    renderSidebar();
+  }
 
   // 离开当前页面前把正在改的文档存好；存不了（比如断网）就问一下要不要丢掉修改
   async function leave() {
@@ -1074,15 +1145,26 @@ flowchart TD
   const showCurrentPage = () => route().catch(() => showMessage('加载失败：网络超时或服务器没有响应，请刷新重试'));
 
   async function go(url) {
-    if (!(await leave())) return;
+    startLoading(url);
+    if (!(await leave())) return cancelLoading();
     history.pushState(null, '', url);
     showCurrentPage();
   }
 
-  document.addEventListener('click', (e) => {
+  const navLinkOf = (e) => {
     const a = e.target.closest('a[data-nav][href]');
     // 按着 Ctrl 等键是要在新标签页打开，照常处理
-    if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    return a && e.button === 0 && !(e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) ? a : null;
+  };
+
+  document.addEventListener('pointerdown', (e) => {
+    const a = navLinkOf(e);
+    if (a && a.href !== location.href) prefetch(a.href);
+  });
+
+  document.addEventListener('click', (e) => {
+    const a = navLinkOf(e);
+    if (!a) return;
     e.preventDefault();
     if (narrow.matches && els.sidebar.contains(a)) showSidebar(false); // 窄屏上目录叠在正文上面，点完收起，好看正文
     if (a.href !== location.href) go(a.href);
@@ -1090,14 +1172,48 @@ flowchart TD
 
   // 后退、前进时地址栏已经变了：先存好当前文档再切过去，用户选择留下的话把地址改回来
   addEventListener('popstate', async () => {
-    if (await leave()) showCurrentPage();
-    else history.pushState(null, '', currentUrl);
+    startLoading(location.href);
+    if (await leave()) {
+      showCurrentPage();
+    } else {
+      history.pushState(null, '', currentUrl);
+      cancelLoading();
+    }
   });
 
   // 换了一页，滚回开头
   function scrollToTop() {
     scrollTo(0, 0);
     for (const el of els.workspace.querySelectorAll('.pane-body, .vditor-sv, .vditor-wysiwyg, .vditor-preview')) el.scrollTop = 0;
+  }
+
+  // 显示文档集的目录页
+  function showSet(set) {
+    docSet = set;
+    docId = null;
+    newDocSet = null;
+    showPage('set');
+    setStatus('');
+    setPageTitle(docSet.title || '新建文档集');
+    renderSetPage();
+    renderSidebar();
+    setupLinkBar();
+  }
+
+  // 显示一篇文档；isStale：等编辑器加载的时候是不是已经切到别处了
+  async function showDoc(id, set, { content, updatedAt }, isStale) {
+    docId = id;
+    newDocSet = null;
+    docSet = set;
+    showPage('doc');
+    renderSidebar();
+    setupLinkBar();
+    await showContent(content, updatedAt);
+    if (isStale()) return;
+    if (state.canEdit) setStatus('已保存');
+    scrollToTop();
+    pageShown();
+    heartbeat({ force: true });
   }
 
   // 按地址栏显示对应的页面：/doc/ID、/doc/new（带 ?set=文档集ID 是建在集里）、/set/ID、/set/new
@@ -1109,24 +1225,26 @@ flowchart TD
     els.onlineCount.textContent = '–';
 
     if (kind === 'set') {
-      let set = { id: null, title: '', updatedAt: null, docs: [] };
-      if (id !== 'new') {
-        const { ok, status, data } = await api(`/api/set/${id}`);
-        if (stale()) return;
-        if (!ok) return showMessage(status === 404 ? '文档集不存在。' : `加载失败：${data.error || status}`);
-        set = data;
+      if (id === 'new') {
+        showSet({ id: null, title: '', updatedAt: null, docs: [] });
+        scrollToTop();
+        return pageShown();
       }
-      docSet = set;
-      docId = null;
-      newDocSet = null;
-      showPage('set');
-      setStatus('');
-      setPageTitle(docSet.title || '新建文档集');
-      renderSetPage();
-      renderSidebar();
-      setupLinkBar();
+      const pending = request(`/api/set/${id}`);
+      // 从集里的文档回到目录页：手上已经有这个文档集，先显示，拿到最新的再换上
+      const known = docSet?.id === id;
+      if (known) {
+        showSet(docSet);
+        scrollToTop();
+        pageShown();
+      }
+      const { ok, status, data } = await pending;
+      if (stale()) return;
+      if (!ok) return showMessage(status === 404 ? '文档集不存在。' : `加载失败：${data.error || status}`);
+      showSet(data);
+      if (known) return;
       scrollToTop();
-      return;
+      return pageShown();
     }
 
     if (id === 'new') {
@@ -1136,7 +1254,7 @@ flowchart TD
       if (setId) {
         set = docSet?.id === setId ? docSet : null;
         if (!set) {
-          const { ok, status, data } = await api(`/api/set/${encodeURIComponent(setId)}`);
+          const { ok, status, data } = await request(`/api/set/${encodeURIComponent(setId)}`);
           if (stale()) return;
           if (!ok) return showMessage(status === 404 ? '文档集不存在，没法在里面新建文档。' : `加载失败：${data.error || status}`);
           set = data;
@@ -1155,24 +1273,23 @@ flowchart TD
       updateTitle(template);
       setStatus('尚未保存');
       scrollToTop();
-      return;
+      return pageShown();
     }
 
     if (!id) return showMessage('链接不完整，请从文档首页新建或打开文档。');
-    const { ok, status, data } = await api(`/api/doc/${id}?set=1`);
+    const pending = request(`/api/doc/${id}?set=1`);
+    // 看过的文档先显示上次的内容（集里切换时文档集不变），拿到最新的再看要不要换
+    const cached = docCache.get(id);
+    if (cached) await showDoc(id, docSet, cached, stale);
+    const { ok, status, data } = await pending;
     if (stale()) return;
     if (!ok) return showMessage(status === 404 ? '文档不存在。' : `加载失败：${data.error || status}`);
-    docId = id;
-    newDocSet = null;
+    if (!cached) return showDoc(id, data.set, data, stale);
+
+    // 和拉取别人保存的新内容一样：顺带更新目录；正在改的话先不换，保存时会合并
     docSet = data.set;
-    showPage('doc');
     renderSidebar();
-    setupLinkBar();
-    await showContent(data.content, data.updatedAt);
-    if (stale()) return;
-    if (state.canEdit) setStatus('已保存');
-    scrollToTop();
-    heartbeat({ force: true });
+    if (data.updatedAt !== state.updatedAt && !saving && !isDirty()) await showContent(data.content, data.updatedAt);
   }
 
   // ---------- 历史版本 ----------

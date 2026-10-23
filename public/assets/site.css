@@ -459,6 +459,52 @@ body.glow {
   overflow: auto;
 }
 
+/* 在文档集里切换（见 editor.js「切换页面」）：等服务器时正文变淡，卡片顶上一条加载条来回跑；
+   都晚 0.15 秒才出现，网络快、或者先显示了缓存的话就不会闪一下 */
+.workspace.loading > .pane:not(.sidebar) {
+  position: relative;
+}
+
+.workspace.loading > .pane:not(.sidebar) > * {
+  opacity: 0.45;
+  transition: opacity 0.2s 0.15s;
+}
+
+.workspace.loading > .pane:not(.sidebar)::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30%;
+  height: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--coral);
+  animation: loading-bar 1s ease-in-out 0.15s infinite backwards;
+}
+
+@keyframes loading-bar {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+/* 新内容显示出来时淡入，看得出换了一篇 */
+.page-in {
+  animation: page-in 0.22s ease-out;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-in {
+    animation: none;
+  }
+}
+
 /* 只读模式：正文居中，限制宽度 */
 .reader {
   max-width: 960px;
