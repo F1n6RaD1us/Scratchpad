@@ -327,12 +327,147 @@ flowchart TD
         after: () => {
           // 字数的提示气泡同样改成往下弹（提示文字见 site.css）
           els.editorPane.querySelector('.vditor-counter').classList.replace('vditor-tooltipped__nw', 'vditor-tooltipped__sw');
+          syncSplitScroll();
 
           state.editorReady = true;
           resolve();
         },
       });
     });
+  }
+
+  // ---------- 分屏预览：左右滚动对齐 ----------
+
+  // Vditor 自带的同步是按比例的：左边滚到 30%，右边也滚到 30%。可预览里的标题、图片比源码里那一行高得多，
+  // 越往下错得越多，改到后面的普通文字时，右边对应的内容远远落在下面。
+  // 改成按「锚点」对齐：源码里的标题、图片和预览里的一一对上，两个锚点之间按比例算。
+  // 监听加在 Vditor 自己的滚动监听之后，同一次滚动里覆盖掉它设的位置，画面上只有最后这次
+  function syncSplitScroll() {
+    const textarea = els.editorPane.querySelector('textarea.vditor-sv');
+    const preview = els.editorPane.querySelector('.vditor-preview');
+    if (!textarea || !preview) return;
+
+    // 量源码某一行在编辑框里的位置：编辑框会自动折行，不能按行数乘行高算。
+    // 照着编辑框的字体、宽度排一遍同样的文字，在要量的行首插一个标记，看标记在哪
+    const mirror = document.createElement('div');
+    mirror.className = 'sv-mirror';
+    mirror.setAttribute('aria-hidden', 'true');
+    document.body.append(mirror);
+    const MIRROR_STYLES = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'wordSpacing',
+      'tabSize', 'whiteSpace', 'overflowWrap', 'wordBreak', 'paddingTop', 'paddingLeft', 'paddingRight'];
+
+    function lineTops(lines, wanted) {
+      const style = getComputedStyle(textarea);
+      for (const name of MIRROR_STYLES) mirror.style[name] = style[name];
+      mirror.style.width = `${textarea.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)}px`;
+      const starts = [...new Set(wanted)].sort((a, b) => a - b);
+      const nodes = [];
+      let from = 0;
+      for (const line of starts) {
+        nodes.push(lines.slice(from, line).map((l) => `${l}\n`).join(''));
+        const mark = document.createElement('span');
+        mark.dataset.line = line;
+        mark.textContent = '​'; // 零宽空格：标记要有高度才量得出位置，又不能挤占宽度改变折行
+        nodes.push(mark);
+        from = line;
+      }
+      nodes.push(lines.slice(from).join('\n'));
+      mirror.replaceChildren(...nodes);
+      return new Map([...mirror.querySelectorAll('span')].map((mark) => [Number(mark.dataset.line), mark.offsetTop]));
+    }
+
+    // 源码里的标题、图片在第几行，跳过代码块里的
+    function sourceMarks(lines) {
+      const headings = [];
+      const images = [];
+      let fence = '';
+      lines.forEach((line, i) => {
+        const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+        if (fence) {
+          if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim()) fence = '';
+          return;
+        }
+        if (marker) {
+          fence = marker[1];
+          return;
+        }
+        // 标题文字里的链接、图片只留显示的文字，才能和预览里的标题文字比对
+        const heading = /^ {0,3}#{1,6}(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(line);
+        if (heading) headings.push({ line: i, key: anchorKey((heading[1] || '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')) });
+        for (const _ of line.matchAll(/!\[[^\]]*\]\([^)]*\)|<img\b/gi)) images.push(i);
+      });
+      return { headings, images };
+    }
+
+    // 锚点 [源码里的位置, 预览里的位置]，都从内容顶端算起，从上到下排好；头尾是两边的开头和结尾。
+    // 标题按文字对：往后最多找几个，预览里多出来的（比如一行字下面紧跟 --- 会变成标题）跳过去；
+    // 图片按顺序对，两边张数不一样（比如有图片语法写在行内代码里）就不用图片
+    let anchors = null;
+    let anchorsOf = null; // 算锚点时的源码，源码变了就重算
+
+    function computeAnchors() {
+      const text = textarea.value;
+      const lines = text.split('\n');
+      const { headings, images } = sourceMarks(lines);
+      const top = preview.getBoundingClientRect().top - preview.scrollTop;
+      const yOf = (el) => el.getBoundingClientRect().top - top;
+
+      const pairs = [];
+      const shown = [...preview.querySelectorAll('h1, h2, h3, h4, h5, h6')];
+      const keys = shown.map((h) => anchorKey(h.textContent));
+      let next = 0;
+      for (const { line, key } of headings) {
+        const found = keys.slice(next, next + 5).indexOf(key);
+        if (found === -1) continue;
+        pairs.push([line, yOf(shown[next + found])]);
+        next += found + 1;
+      }
+      const imgs = preview.querySelectorAll('img');
+      if (imgs.length === images.length) images.forEach((line, i) => pairs.push([line, yOf(imgs[i])]));
+
+      const tops = lineTops(lines, pairs.map(([line]) => line));
+      const end = [textarea.scrollHeight, preview.scrollHeight];
+      anchors = [[0, 0]];
+      for (const [s, p] of pairs.map(([line, y]) => [tops.get(line), y]).sort((a, b) => a[0] - b[0])) {
+        const [s0, p0] = anchors.at(-1);
+        if (s > s0 && p >= p0 && s < end[0] && p < end[1]) anchors.push([s, p]);
+      }
+      anchors.push(end);
+      anchorsOf = text;
+    }
+
+    // 对齐的基准线：滚到最上面时是视野顶端，滚到最下面时是视野底端，中间平滑过渡，
+    // 这样两边总是一起到顶、一起到底
+    function sync() {
+      if (preview.style.display !== 'block' || !textarea.offsetParent) return; // 所见即所得模式、编辑器不在页面上
+      if (!anchors || anchorsOf !== textarea.value) computeAnchors();
+      const max = textarea.scrollHeight - textarea.clientHeight;
+      const f = max > 0 ? Math.min(1, textarea.scrollTop / max) : 0;
+      const s = textarea.scrollTop + textarea.clientHeight * f;
+      let i = 1;
+      while (i < anchors.length - 1 && anchors[i][0] < s) i++;
+      const [s0, p0] = anchors[i - 1];
+      const [s1, p1] = anchors[i];
+      const p = s1 > s0 ? p0 + ((p1 - p0) * (s - s0)) / (s1 - s0) : p0;
+      preview.scrollTop = p - preview.clientHeight * f;
+    }
+
+    textarea.addEventListener('scroll', sync);
+
+    // 预览重新渲染、图片加载完、宽度变了，位置都会变：作废锚点，下一帧重新对齐
+    let frame = 0;
+    const later = () => {
+      anchors = null;
+      frame ||= requestAnimationFrame(() => {
+        frame = 0;
+        sync();
+      });
+    };
+    new MutationObserver(later).observe(preview, { childList: true, subtree: true, characterData: true });
+    const resized = new ResizeObserver(later);
+    resized.observe(textarea);
+    resized.observe(preview.firstElementChild);
+    preview.addEventListener('load', later, true); // 图片的 load 不冒泡，在捕获阶段接
   }
 
   // 有没有编辑权限：打开页面时校验一次密钥，之后不变

@@ -728,6 +728,19 @@ body.glow {
   border-radius: 0;
 }
 
+/* 分屏预览对齐滚动时用来量源码行位置的影子（见 editor.js「分屏预览：左右滚动对齐」）。
+   放在屏幕外、不占地方，字体和宽度由脚本照着编辑框设 */
+.sv-mirror {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  box-sizing: content-box;
+}
+
 /* 字数的提示气泡：Vditor 默认显示统计类型名（“text”），而且每次更新都会重写，所以直接用 CSS 指定 */
 #editorPane .vditor-counter::after {
   content: "字数";
