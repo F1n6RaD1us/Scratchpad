@@ -106,6 +106,9 @@ flowchart TD
     editorReady: false, // 编辑器创建好了（编辑模式下第一次打开文档时才创建）
     updatedAt: null,    // 服务器上当前版本的时间戳，保存时用作乐观锁
     savedContent: '',   // 最后一次和服务器一致的内容
+    // 之后发出去、但没收到确切结果的保存内容（网络断了、超时、服务器出错，或者浏览器自己重发了请求）：
+    // 服务器可能已经存上了。保存冲突时拿它认出服务器上的「新版本」其实是自己存的（见 saveNow）
+    unconfirmed: [],
     autosaveTimer: null,
   };
 
@@ -151,6 +154,9 @@ flowchart TD
     const content = vditor.getValue();
     return content !== state.savedContent && (docId !== null || content.trim() !== '');
   }
+  // 能不能拿刚从服务器取到的内容换掉编辑器里的：正在改、正在存的时候不换，保存时会合并。
+  // known 是请求发出时手上的版本：等结果期间自己存了一版的话，这份结果可能是存之前读的，比手上的还旧
+  const canReplace = (known) => state.updatedAt === known && !saving && !composing && !isDirty();
 
   function setStatus(text, isError = false) {
     els.status.textContent = text;
@@ -287,6 +293,7 @@ flowchart TD
       await editorLoaded;
     }
     state.savedContent = vditor.getValue(); // Vditor 会规范化格式，以它的结果为基准判断有没有改动
+    state.unconfirmed = [];
   }
 
   function createEditor(content) {
@@ -589,6 +596,7 @@ flowchart TD
       if (!isDirty() && !(create && docId === null)) return setStatus(docId === null ? '尚未保存' : '已保存');
 
       setStatus('保存中…');
+      state.unconfirmed = [...state.unconfirmed.slice(-9), content]; // 一直断网时只留最近几次，免得占着内存
       const res = await (docId === null
         ? api('/api/doc', { content, anonId, ...(newDocSet && { setId: newDocSet, editKey: state.editKey }) })
         : api(`/api/doc/${docId}`, {
@@ -601,8 +609,11 @@ flowchart TD
 
       if (!res) return setStatus('保存失败：网络错误', true);
       if (res.status === 409) {
-        mergeRemote(res.data);
-        continue; // 合并完立即再存一次
+        // 服务器上的正是我之前发出去的内容：那次其实存上了，只是没收到结果。现在的内容就是在它上面接着改的，
+        // 以它为底版直接再存，不能当成别人的修改去合并，否则自己前后两次的写法会被标成冲突
+        if (state.unconfirmed.includes(res.data.content)) confirmSaved(res.data.content, res.data.updatedAt);
+        else mergeRemote(res.data);
+        continue; // 立即再存一次
       }
       if (res.status === 403) {
         setStatus('无权编辑', true);
@@ -611,14 +622,20 @@ flowchart TD
       if (!res.ok) return setStatus(`保存失败：${res.data.error || res.status}`, true);
 
       if (docId === null) onCreated(res.data);
-      state.savedContent = content;
-      setUpdatedAt(res.data.updatedAt);
-      docCache.set(docId, { content, updatedAt: res.data.updatedAt });
+      confirmSaved(content, res.data.updatedAt);
       rememberTitle(docId, docTitle(content));
       if (isDirty()) scheduleAutosave(); // 保存期间又有输入，再排一次
       else setStatus('已保存');
       return;
     }
+  }
+
+  // 确认服务器上是 content 这个版本了
+  function confirmSaved(content, updatedAt) {
+    state.savedContent = content;
+    state.unconfirmed = [];
+    setUpdatedAt(updatedAt);
+    docCache.set(docId, { content, updatedAt });
   }
 
   // 保存时发现别人在我编辑期间存了新版本：像 git 合并分支一样三方合并（见 merge.js），
@@ -627,6 +644,7 @@ flowchart TD
   function mergeRemote(remote) {
     const { text, conflicts } = mergeText(state.savedContent, vditor.getValue(), remote.content);
     state.savedContent = remote.content;
+    state.unconfirmed = [];
     setUpdatedAt(remote.updatedAt);
     setValueKeepingCaret(text);
     updateTitle(text);
@@ -687,8 +705,15 @@ flowchart TD
   function scheduleAutosave() {
     clearTimeout(state.autosaveTimer);
     setStatus('未保存');
-    state.autosaveTimer = setTimeout(save, AUTOSAVE_DELAY_MS);
+    state.autosaveTimer = setTimeout(autosave, AUTOSAVE_DELAY_MS);
   }
+
+  // 正在用输入法打字、还没选字时，编辑区里是 ya'suo'd 这样的拼音。这时自动保存会把拼音存上去，
+  // 别人那边、历史版本里都看得到，所以等选完字再存
+  let composing = false;
+  els.editorPane.addEventListener('compositionstart', () => { composing = true; });
+  els.editorPane.addEventListener('compositionend', () => { composing = false; });
+  const autosave = () => (composing ? scheduleAutosave() : save());
 
   // 用新内容替换全文并立即保存（导入文件、恢复历史版本）；Ctrl+Z 可以撤销
   function replaceContent(text) {
@@ -1360,7 +1385,8 @@ flowchart TD
   // 离开当前页面前把正在改的文档存好；存不了（比如断网）就问一下要不要丢掉修改
   async function leave() {
     await renaming;
-    if (saving || isDirty()) await save();
+    if (saving) await saving; // 存的这段时间里又改的内容，这次存完不会马上再存（见 saveNow 结尾），下面补上
+    if (isDirty()) await save();
     return !isDirty() || confirm('这篇文档还有修改没保存成功，离开的话这些修改会丢掉。确定离开吗？');
   }
 
@@ -1503,6 +1529,7 @@ flowchart TD
     // 看过的文档先显示上次的内容（集里切换时文档集不变），拿到最新的再看要不要换
     const cached = docCache.get(id);
     if (cached) await showDoc(id, docSet, cached, stale);
+    const shown = state.updatedAt;
     const { ok, status, data } = await pending;
     if (stale()) return;
     if (!ok) return showMessage(status === 404 ? '文档不存在。' : `加载失败：${data.error || status}`);
@@ -1511,7 +1538,7 @@ flowchart TD
     // 和拉取别人保存的新内容一样：顺带更新目录；正在改的话先不换，保存时会合并
     docSet = data.set;
     renderSidebar();
-    if (data.updatedAt !== state.updatedAt && !saving && !isDirty()) await showContent(data.content, data.updatedAt);
+    if (data.updatedAt !== state.updatedAt && canReplace(shown)) await showContent(data.content, data.updatedAt);
   }
 
   // ---------- 历史版本 ----------
@@ -1580,14 +1607,15 @@ flowchart TD
   // ---------- 拉取别人保存的新内容 ----------
 
   async function refresh() {
-    if (document.hidden || saving || isDirty()) return; // 有未保存的修改时交给保存时的冲突处理
+    if (document.hidden || saving || composing || isDirty()) return; // 有未保存的修改时交给保存时的冲突处理
     const id = docId;
+    const known = state.updatedAt;
     const { ok, data } = await api(`/api/doc/${id}?set=1`);
     if (!ok || id !== docId || page !== 'doc') return;
     // 顺带更新目录：别人可能在集里新建了文档、改了标题
     docSet = data.set;
     renderSidebar();
-    if (data.updatedAt === state.updatedAt || isDirty()) return;
+    if (data.updatedAt === state.updatedAt || !canReplace(known)) return;
     showContent(data.content, data.updatedAt);
   }
 
