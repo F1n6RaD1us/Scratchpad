@@ -31,6 +31,10 @@
             <button class="btn" id="treeBtn" title="显示 / 收起目录" hidden>
                 <i class="icon i-sidebar"></i><span>目录</span>
             </button>
+            <!-- 只读页、文档里有两个以上标题时才出现 -->
+            <button class="btn" id="outlineBtn" title="显示 / 收起这篇文档的大纲" hidden>
+                <i class="icon i-outline"></i><span>大纲</span>
+            </button>
             <span class="tool-group" id="editTools" hidden>
                 <button class="btn" id="importBtn" title="导入 .md 文件（也可以直接粘贴或拖进编辑区）">
                     <i class="icon i-upload"></i><span>导入</span>
@@ -119,6 +123,13 @@
                 <article class="doc-body" id="preview"><p class="empty">加载中…</p></article>
             </div>
         </section>
+        <!-- 大纲：只读页右边列出这篇文档的标题，点了跳过去（见 editor.js「大纲」） -->
+        <aside class="pane outline" id="outlinePane" hidden>
+            <div class="pane-head"><b>大纲</b></div>
+            <nav class="pane-body" id="outlineBody">
+                <ul class="outline-list" id="outline"></ul>
+            </nav>
+        </aside>
     </main>
 
     <!-- 只在打印（Ctrl+P / 另存为 PDF）时显示：打印前填入当前文档，界面其余部分全部隐藏 -->

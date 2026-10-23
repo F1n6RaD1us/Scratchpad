@@ -109,6 +109,7 @@ body.glow {
 .i-link { --i: url("/vendor/lucide/link.svg"); }
 .i-lock { --i: url("/vendor/lucide/lock.svg"); }
 .i-logout { --i: url("/vendor/lucide/log-out.svg"); }
+.i-outline { --i: url("/vendor/lucide/table-of-contents.svg"); }
 .i-pencil { --i: url("/vendor/lucide/pencil.svg"); }
 .i-plus { --i: url("/vendor/lucide/plus.svg"); }
 .i-refresh { --i: url("/vendor/lucide/refresh-cw.svg"); }
@@ -461,16 +462,16 @@ body.glow {
 
 /* 在文档集里切换（见 editor.js「切换页面」）：等服务器时正文变淡，卡片顶上一条加载条来回跑；
    都晚 0.15 秒才出现，网络快、或者先显示了缓存的话就不会闪一下 */
-.workspace.loading > .pane:not(.sidebar) {
+.workspace.loading > .pane:not(.sidebar):not(.outline) {
   position: relative;
 }
 
-.workspace.loading > .pane:not(.sidebar) > * {
+.workspace.loading > .pane:not(.sidebar):not(.outline) > * {
   opacity: 0.45;
   transition: opacity 0.2s 0.15s;
 }
 
-.workspace.loading > .pane:not(.sidebar)::after {
+.workspace.loading > .pane:not(.sidebar):not(.outline)::after {
   content: "";
   position: absolute;
   top: 0;
@@ -591,6 +592,55 @@ body.glow {
   margin-top: 4px;
   padding-left: 24px;
   color: var(--muted);
+}
+
+/* ---------- 大纲（只读页右边，这篇文档的标题） ---------- */
+
+.outline {
+  flex: none;
+  width: 220px;
+}
+
+/* 高亮的那一项要按它在列表里的位置滚动（见 editor.js 的 setOutlineActive） */
+.outline .pane-body {
+  position: relative;
+  padding: 6px;
+}
+
+.outline-list {
+  list-style: none;
+}
+
+.outline-item {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  padding: 5px 8px 5px calc(8px + var(--level) * 14px);
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: 13px/1.5 var(--font);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.outline-item:hover {
+  background: var(--chip);
+  color: var(--ink);
+}
+
+.outline-item.active {
+  box-shadow: inset 2px 0 0 var(--coral);
+  color: var(--coral-ink);
+  font-weight: 600;
+}
+
+.outline-item:focus-visible {
+  outline: 2px solid var(--coral);
+  outline-offset: -2px;
 }
 
 /* ---------- 文档集的目录页 ---------- */
@@ -717,13 +767,8 @@ html .vditor-reset {
   font-family: var(--font);
 }
 
-html .vditor-reset a,
-.vditor-toc {
-  color: var(--coral-ink); /* [toc] 目录 Vditor 写死了蓝色 */
-}
-
-.vditor-toc span:hover {
-  text-decoration: underline;
+html .vditor-reset a {
+  color: var(--coral-ink);
 }
 
 html .vditor-reset blockquote {
@@ -1408,9 +1453,19 @@ html .vditor-reset code:not(.hljs):not(.highlight-chroma) {
     padding: 8px;
   }
 
-  .sidebar {
+  /* 竖着排时目录、大纲都放在正文上面 */
+  .sidebar,
+  .outline {
     width: auto;
     max-height: 40vh;
+  }
+
+  .sidebar {
+    order: -2;
+  }
+
+  .outline {
+    order: -1;
   }
 
   /* 竖着排时左右的 auto 外边距会让卡片缩到内容那么窄 */

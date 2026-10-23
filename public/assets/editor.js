@@ -126,13 +126,22 @@ flowchart TD
       mode: t.content,
       theme: { current: t.content, path: CONTENT_THEME_PATH },
       hljs: { style: t.code },
-      markdown: { sanitize: true, toc: true }, // sanitize 过滤 <script>、onerror 之类，防止文档里夹带恶意代码；toc 让 [toc] 生成目录
+      markdown: { sanitize: true }, // 过滤 <script>、onerror 之类，防止文档里夹带恶意代码
       math: { engine: 'KaTeX' },
       anchor: 0,
     };
   }
 
-  const renderInto = (el, md) => Vditor.preview(el, md, previewOptions());
+  // after：渲染完之后再做的事。
+  // [toc] 以前会在那里生成目录，现在改成只读页右边的大纲（见下文「大纲」），旧文档里单独一行的 [toc]
+  // 渲染出来就是这几个字，去掉。按段落整段比较，代码块里写的 [toc] 不受影响
+  const renderInto = (el, md, after) => Vditor.preview(el, md, {
+    ...previewOptions(),
+    after: () => {
+      for (const p of el.querySelectorAll('p')) if (p.textContent.trim().toLowerCase() === '[toc]') p.remove();
+      after?.();
+    },
+  });
   // 正在编辑器里改文档（不是只读，也不在文档集的目录页上）
   const editing = () => state.editorReady && page === 'doc';
   const currentContent = () => (editing() ? vditor.getValue() : state.savedContent);
@@ -236,18 +245,10 @@ flowchart TD
     return !!target;
   }
 
-  // 只读页、历史预览是静态渲染的，两种目录都在这里接管：
-  // - 手写的锚点链接由浏览器处理，链接和标题 id 对不上时浏览器跳不过去
-  // - [toc] 生成的目录由 Vditor 处理，但它滚动的是整个窗口，而这里滚动的是正文卡片，点了没反应。
-  //   这个监听器比 Vditor 的先注册，stopImmediatePropagation 挡掉它的处理，免得两边的滚动叠在一起
+  // 只读页、历史预览是静态渲染的，手写的锚点链接在这里接管：
+  // 浏览器自己处理的话，链接和标题 id 对不上时跳不过去
   for (const el of [els.preview, els.versionPreview]) {
     el.addEventListener('click', (e) => {
-      const tocItem = e.target.closest('.vditor-toc span[data-target-id]');
-      if (tocItem) {
-        e.stopImmediatePropagation();
-        el.querySelector(`[id="${CSS.escape(tocItem.dataset.targetId)}"]`)?.scrollIntoView({ block: 'start' });
-        return;
-      }
       const a = e.target.closest('a[href^="#"]');
       if (a && jumpToAnchor(el, a.getAttribute('href'))) e.preventDefault();
     });
@@ -268,7 +269,7 @@ flowchart TD
       await ensureEditor(content);
     } else {
       state.savedContent = content;
-      renderInto(els.preview, content);
+      renderInto(els.preview, content, renderOutline);
     }
     updateTitle(content);
   }
@@ -306,7 +307,7 @@ flowchart TD
         preview: {
           theme: { current: t.content, path: CONTENT_THEME_PATH },
           hljs: { style: t.code },
-          markdown: { sanitize: true, toc: true },
+          markdown: { sanitize: true },
           math: { engine: 'KaTeX' },
           actions: [], // 分屏预览上方的“桌面 / 平板 / 手机 / 复制到公众号”那排按钮用不上
         },
@@ -357,6 +358,7 @@ flowchart TD
     els.importBtn.hidden = els.saveBtn.hidden = !inEditor;
     els.downloadBtn.hidden = !onDoc;
     updateSavedButtons();
+    renderOutline(); // 只读的文档才有大纲，别的页面收起
   }
 
   // 链接、历史、在线人数要等文档（文档集）在服务器上建好了才有
@@ -968,6 +970,91 @@ flowchart TD
     label.textContent = title || '无标题';
     label.classList.toggle('untitled', !title);
   }
+
+  // ---------- 大纲：只读页右边列出这篇文档的标题 ----------
+
+  // 点标题跳过去，滚动时高亮正在读的那一节。编辑模式下用 Vditor 工具栏自带的「大纲」，这里不显示；
+  // 标题少于两个时没什么可列的，也不显示。
+  // 宽屏上默认展开，收起后会记住；放不下目录、正文、大纲三栏时默认收起，开关不记；手机上叠在正文上面，点了标题自动收起
+  const OUTLINE_HIDDEN_KEY = 'shareddoc:outlineHidden';
+  const roomy = matchMedia('(min-width: 1100px)');
+  let outlineWanted = roomy.matches && localStorage.getItem(OUTLINE_HIDDEN_KEY) !== 'true';
+  let headings = []; // 大纲里列出的标题元素，和 els.outline 里的按钮一一对应
+
+  function showOutline() {
+    els.outlinePane.hidden = !(outlineWanted && headings.length);
+    els.outlineBtn.classList.toggle('active', !els.outlinePane.hidden);
+  }
+
+  els.outlineBtn.onclick = () => {
+    outlineWanted = els.outlinePane.hidden;
+    if (roomy.matches) localStorage.setItem(OUTLINE_HIDDEN_KEY, String(!outlineWanted));
+    showOutline();
+    updateOutlineActive();
+  };
+
+  // 渲染完正文、切换页面后调用
+  function renderOutline() {
+    const found = page === 'doc' && !state.canEdit ? [...els.preview.querySelectorAll('h1, h2, h3, h4')] : [];
+    headings = found.length >= 2 ? found : [];
+    els.outlineBtn.hidden = !headings.length;
+    // 按文档里最大的那级标题对齐：只用了 ## 的文档，大纲不会整体往里缩一格
+    const top = Math.min(...headings.map((h) => Number(h.tagName[1])));
+    els.outline.replaceChildren(...headings.map((h, i) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'outline-item';
+      item.textContent = h.textContent.trim() || '（空标题）';
+      item.title = item.textContent;
+      item.style.setProperty('--level', Number(h.tagName[1]) - top);
+      item.onclick = () => {
+        if (narrow.matches) {
+          outlineWanted = false;
+          showOutline();
+        }
+        h.scrollIntoView({ block: 'start' });
+        setOutlineActive(i);
+      };
+      const li = document.createElement('li');
+      li.append(item);
+      return li;
+    }));
+    showOutline();
+    updateOutlineActive();
+  }
+
+  function setOutlineActive(index) {
+    const items = els.outline.querySelectorAll('.outline-item');
+    items.forEach((item, i) => item.classList.toggle('active', i === index));
+    // 大纲很长时，让高亮的那一项留在看得见的地方
+    const item = items[index];
+    const box = els.outlineBody;
+    if (!item || box.scrollHeight <= box.clientHeight) return;
+    if (item.offsetTop < box.scrollTop || item.offsetTop + item.offsetHeight > box.scrollTop + box.clientHeight) {
+      box.scrollTop = item.offsetTop - box.clientHeight / 3;
+    }
+  }
+
+  // 正在读的那一节：顶端已经滚到阅读区上沿（留一点余量）的最后一个标题。
+  // 宽屏上滚动的是正文卡片，手机上是整个页面，两边都监听；一帧最多算一次
+  const readerBody = els.readerPane.querySelector('.pane-body');
+  let outlineFrame = 0;
+
+  function updateOutlineActive() {
+    if (els.outlinePane.hidden || outlineFrame) return;
+    outlineFrame = requestAnimationFrame(() => {
+      outlineFrame = 0;
+      const line = Math.max(readerBody.getBoundingClientRect().top, 0) + 24;
+      let index = 0;
+      headings.forEach((h, i) => {
+        if (h.getBoundingClientRect().top <= line) index = i;
+      });
+      setOutlineActive(index);
+    });
+  }
+
+  readerBody.addEventListener('scroll', updateOutlineActive, { passive: true });
+  addEventListener('scroll', updateOutlineActive, { passive: true });
 
   // ---------- 文档集的目录页 ----------
 
